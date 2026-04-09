@@ -128,6 +128,28 @@ public partial class MainViewModel
             State.UI.ShowDialog(DialogType.NtripProfiles);
         });
 
+        ConnectNtripProfileCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            var profile = SelectedNtripProfile ?? _ntripProfileService.DefaultProfile;
+            if (profile == null)
+            {
+                StatusMessage = "No NTRIP profile selected or set as default";
+                return;
+            }
+
+            NtripCasterAddress = profile.CasterHost;
+            NtripCasterPort = profile.CasterPort;
+            NtripMountPoint = profile.MountPoint;
+            NtripUsername = profile.Username;
+            NtripPassword = profile.Password;
+            await ConnectToNtripAsync();
+        });
+
+        DisconnectNtripCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            await DisconnectFromNtripAsync();
+        });
+
         TestNtripConnectionCommand = ReactiveCommand.CreateFromTask(async () =>
         {
             if (EditingNtripProfile == null) return;

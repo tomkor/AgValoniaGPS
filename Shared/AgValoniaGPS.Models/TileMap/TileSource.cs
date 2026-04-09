@@ -24,6 +24,12 @@ public enum TileSource
     /// <summary>OpenStreetMap standard tile layer (XYZ, free, no API key required)</summary>
     OpenStreetMap,
 
+    /// <summary>ESRI World Imagery satellite layer (free, no API key, high resolution)</summary>
+    EsriWorldImagery,
+
+    /// <summary>Geoportal.gov.pl high-resolution orthophoto (WMS, Poland only)</summary>
+    GeoportalOrto,
+
     /// <summary>Custom XYZ tile URL template supplied by the user ({z}/{x}/{y} placeholders)</summary>
     Custom
 }

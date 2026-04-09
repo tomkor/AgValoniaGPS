@@ -15,7 +15,6 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 using System;
-using System.IO;
 
 namespace AgValoniaGPS.Services.Interfaces;
 
@@ -26,12 +25,12 @@ namespace AgValoniaGPS.Services.Interfaces;
 public interface ITileMapService
 {
     /// <summary>
-    /// Returns a raw PNG stream for the requested tile, or null if not yet cached.
+    /// Returns raw image bytes for the requested tile, or null if not yet cached.
     /// When null is returned the download is started automatically; <paramref name="onLoaded"/>
-    /// is called (on a thread-pool thread) when the tile becomes available so the caller
-    /// can trigger a re-render.
+    /// is called when the tile becomes available so the caller can trigger a re-render.
+    /// The returned array is owned by the cache — do not mutate it.
     /// </summary>
-    Stream? GetTile(int z, int x, int y, Action onLoaded);
+    byte[]? GetTile(int z, int x, int y, Action onLoaded);
 
     /// <summary>Convert WGS84 lat/lon to OSM tile coordinates at the given zoom level.</summary>
     (int tileX, int tileY) LatLonToTile(double lat, double lon, int zoom);

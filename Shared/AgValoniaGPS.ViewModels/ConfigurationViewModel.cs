@@ -23,6 +23,7 @@ using System.Windows.Input;
 using ReactiveUI;
 using AgValoniaGPS.Models;
 using AgValoniaGPS.Models.Configuration;
+using AgValoniaGPS.Models.TileMap;
 using AgValoniaGPS.Services.Interfaces;
 
 namespace AgValoniaGPS.ViewModels;
@@ -1004,6 +1005,7 @@ public partial class ConfigurationViewModel : ReactiveObject
     public ICommand ToggleElevationLogCommand { get; private set; } = null!;
     public ICommand ToggleFieldTextureCommand { get; private set; } = null!;
     public ICommand ToggleTileMapCommand { get; private set; } = null!;
+    public ICommand SetTileSourceCommand { get; private set; } = null!;
     public ICommand ToggleGridCommand { get; private set; } = null!;
     public ICommand ToggleExtraGuidelinesCommand { get; private set; } = null!;
     public ICommand EditExtraGuidelinesCountCommand { get; private set; } = null!;
@@ -1052,6 +1054,11 @@ public partial class ConfigurationViewModel : ReactiveObject
         // Subscribe to Serial GPS connection state changes
         if (_serialGpsService != null)
         {
+            // Sync initial state from the service (may already be connected)
+            IsSerialConnected = _serialGpsService.IsConnected;
+            if (_serialGpsService.IsConnected && _serialGpsService.ConnectedPortName != null)
+                SelectedSerialPort = _serialGpsService.ConnectedPortName;
+
             _serialGpsService.ConnectionStateChanged += (_, connected) =>
             {
                 IsSerialConnected = connected;
@@ -1787,6 +1794,19 @@ public partial class ConfigurationViewModel : ReactiveObject
         ToggleTileMapCommand = ReactiveCommand.Create(() =>
         {
             Display.TileMapEnabled = !Display.TileMapEnabled;
+            Config.MarkChanged();
+        });
+
+        SetTileSourceCommand = ReactiveCommand.Create<string>(sourceName =>
+        {
+            Display.TileMapSource = sourceName switch
+            {
+                "esri"      => TileSource.EsriWorldImagery,
+                "geoportal" => TileSource.GeoportalOrto,
+                "custom"    => TileSource.Custom,
+                _           => TileSource.OpenStreetMap
+            };
+            Display.TileMapEnabled = true;
             Config.MarkChanged();
         });
 

@@ -35,14 +35,19 @@ public partial class MainViewModel
 
         CloseDataIODialogCommand = ReactiveCommand.Create(CloseDataIODialog);
 
-        // Configuration Dialog
+        // Configuration Dialog — created once and reused to preserve connection state
         ShowConfigurationDialogCommand = ReactiveCommand.Create(() =>
         {
-            ConfigurationViewModel = new ConfigurationViewModel(_configurationService);
-            ConfigurationViewModel.CloseRequested += (s, e) =>
+            if (ConfigurationViewModel == null)
             {
-                ConfigurationViewModel.IsDialogVisible = false;
-            };
+                ConfigurationViewModel = new ConfigurationViewModel(_configurationService,
+                    bluetoothGpsService: _bluetoothGpsService,
+                    serialGpsService: _serialGpsService);
+                ConfigurationViewModel.CloseRequested += (s, e) =>
+                {
+                    ConfigurationViewModel.IsDialogVisible = false;
+                };
+            }
             ConfigurationViewModel.IsDialogVisible = true;
         });
 

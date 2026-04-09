@@ -470,10 +470,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
                                       MinWidth="110"/>
                         </Grid>
 
-                        <!-- Connect button — requires Enable toggle ON -->
+                        <!-- Connect button -->
                         <Button Classes="ActionButton"
                                 Command="{Binding ConnectSerialDeviceCommand}"
-                                IsEnabled="{Binding Connections.SerialGpsEnabled}"
                                 HorizontalAlignment="Stretch">
                             <TextBlock Text="Connect Selected" HorizontalAlignment="Center"
                                        Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>

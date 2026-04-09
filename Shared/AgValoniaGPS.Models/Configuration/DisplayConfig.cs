@@ -225,15 +225,31 @@ public class DisplayConfig : ReactiveObject
     public bool TileMapEnabled
     {
         get => _tileMapEnabled;
-        set => this.RaiseAndSetIfChanged(ref _tileMapEnabled, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _tileMapEnabled, value);
+            this.RaisePropertyChanged(nameof(IsOsmTileSource));
+            this.RaisePropertyChanged(nameof(IsEsriTileSource));
+            this.RaisePropertyChanged(nameof(IsGeoportalTileSource));
+        }
     }
 
     private TileSource _tileMapSource = TileSource.OpenStreetMap;
     public TileSource TileMapSource
     {
         get => _tileMapSource;
-        set => this.RaiseAndSetIfChanged(ref _tileMapSource, value);
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _tileMapSource, value);
+            this.RaisePropertyChanged(nameof(IsOsmTileSource));
+            this.RaisePropertyChanged(nameof(IsEsriTileSource));
+            this.RaisePropertyChanged(nameof(IsGeoportalTileSource));
+        }
     }
+
+    public bool IsOsmTileSource       => TileMapEnabled && _tileMapSource == TileSource.OpenStreetMap;
+    public bool IsEsriTileSource      => TileMapEnabled && _tileMapSource == TileSource.EsriWorldImagery;
+    public bool IsGeoportalTileSource => TileMapEnabled && _tileMapSource == TileSource.GeoportalOrto;
 
     private double _tileMapOpacity = 1.0;
     public double TileMapOpacity

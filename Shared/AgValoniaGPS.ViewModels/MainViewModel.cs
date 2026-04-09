@@ -1700,6 +1700,8 @@ public partial class MainViewModel : ReactiveObject
     public ICommand? SaveNtripProfileCommand { get; private set; }
     public ICommand? CancelNtripProfileEditCommand { get; private set; }
     public ICommand? TestNtripConnectionCommand { get; private set; }
+    public ICommand? ConnectNtripProfileCommand { get; private set; }
+    public ICommand? DisconnectNtripCommand { get; private set; }
 
     // Settings Commands
     public ICommand? ShowAppDirectoriesDialogCommand { get; private set; }

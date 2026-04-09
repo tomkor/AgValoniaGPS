@@ -50,4 +50,7 @@ public interface ISerialGpsService
 
     /// <summary>Close the serial port and stop reading.</summary>
     Task DisconnectAsync();
+
+    /// <summary>Write raw bytes to the serial port (e.g. RTCM corrections).</summary>
+    Task WriteAsync(byte[] data);
 }

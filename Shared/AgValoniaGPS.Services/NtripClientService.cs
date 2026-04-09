@@ -373,7 +373,8 @@ public class NtripClientService : INtripClientService, IDisposable
 
                 RtcmDataReceived?.Invoke(this, new RtcmDataReceivedEventArgs
                 {
-                    BytesReceived = packet.Length
+                    BytesReceived = packet.Length,
+                    Data = packet
                 });
             }
             catch (Exception ex)

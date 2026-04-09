@@ -73,7 +73,7 @@ namespace AgValoniaGPS.Models
         public bool NtripAutoConnect { get; set; } = false;
 
         // Simulator settings
-        public bool SimulatorEnabled { get; set; } = true;
+        public bool SimulatorEnabled { get; set; } = false;
         public double SimulatorLatitude { get; set; } = 50.0563434;
         public double SimulatorLongitude { get; set; } = 22.6793416;
         public double SimulatorSpeed { get; set; } = 0.0;

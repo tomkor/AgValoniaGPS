@@ -216,6 +216,14 @@ public class DrawingContextMapControl : Control, ISharedMapControl
     /// </summary>
     public event EventHandler<MapClickEventArgs>? MapClicked;
 
+    // Tile bitmap cache: key (src/z/x/y) → decoded Bitmap, owned here.
+    // Read and written only on UI thread (Render + Dispatcher.UIThread.Post) — no lock needed.
+    private readonly Dictionary<string, Bitmap> _tileBitmapCache = new();
+    private readonly Queue<string> _tileBitmapEviction = new();
+    private const int TileBitmapCacheMax = 256;
+    // Max new bitmap decodes per render frame to avoid frame budget overrun
+    private const int MaxDecodesPerFrame = 2;
+
     // Camera/viewport state
     private double _cameraX = 0.0;
     private double _cameraY = 0.0;
@@ -935,13 +943,16 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         }
         if (originLat == 0 && originLon == 0) return; // No GPS fix yet
 
-        // Pick OSM zoom level so that each tile is a reasonable number of screen pixels.
+        // Pick tile zoom level so that each tile covers a reasonable ground area.
         // viewWidth is the ground width visible on screen (metres).
-        // Target: ~3 tiles visible across the viewport so each tile renders near its native
-        // 256 px resolution.  At equator: tileMeters = 40075016/2^z, so we solve
-        //   z = log2(40075016 * 3 / viewWidth) ≈ 26.84 − log2(viewWidth)
-        // We round up slightly (constant 27) to bias toward sharper tiles.
-        int osmZoom = Math.Clamp((int)(27.0 - Math.Log2(Math.Max(viewWidth, 1.0))), 10, 18);
+        // Formula: z = log2(40075016 * 3 / viewWidth) ≈ 26.84 − log2(viewWidth)
+        // Max zoom depends on source: OSM caps at 18, ESRI at 19, Geoportal WMS at 20
+        // (Geoportal is WMS — any zoom works; higher zoom = smaller tiles = sharper detail).
+        var tileSource = AgValoniaGPS.Models.Configuration.ConfigurationStore.Instance.Display.TileMapSource;
+        int maxZoom = tileSource == AgValoniaGPS.Models.TileMap.TileSource.GeoportalOrto ? 20
+                    : tileSource == AgValoniaGPS.Models.TileMap.TileSource.EsriWorldImagery ? 19
+                    : 18;
+        int osmZoom = Math.Clamp((int)(27.0 - Math.Log2(Math.Max(viewWidth, 1.0))), 10, maxZoom);
 
         var geo = new GeoConversion(originLat, originLon);
 
@@ -959,6 +970,8 @@ public class DrawingContextMapControl : Control, ISharedMapControl
 
         using var _ = context.PushOpacity(opacity);
 
+        int decodesThisFrame = 0;
+
         for (int dtx = -radiusX; dtx <= radiusX; dtx++)
         {
             int tx = centerTX + dtx;
@@ -969,18 +982,46 @@ public class DrawingContextMapControl : Control, ISharedMapControl
                 int ty = centerTY + dty;
                 if (ty < 0 || ty >= n) continue;
 
-                Stream? stream = tileService.GetTile(osmZoom, tx, ty, () =>
+                // Get raw bytes — only returns from in-memory byte cache (never blocks UI)
+                byte[]? tileBytes = tileService.GetTile(osmZoom, tx, ty, () =>
                     Dispatcher.UIThread.Post(InvalidateVisual));
 
-                if (stream == null) continue;
+                if (tileBytes == null) continue;
 
-                Bitmap? bitmap = null;
-                try
+                // Bitmap cache key includes source so switching sources invalidates cache
+                string srcTag = AgValoniaGPS.Models.Configuration.ConfigurationStore.Instance.Display.TileMapSource switch
                 {
-                    using (stream)
-                        bitmap = new Bitmap(stream);
+                    AgValoniaGPS.Models.TileMap.TileSource.EsriWorldImagery => "e",
+                    AgValoniaGPS.Models.TileMap.TileSource.GeoportalOrto    => "g",
+                    AgValoniaGPS.Models.TileMap.TileSource.Custom           => "c",
+                    _                                                        => "o"
+                };
+                string bitmapKey = $"{srcTag}/{osmZoom}/{tx}/{ty}";
+
+                if (!_tileBitmapCache.TryGetValue(bitmapKey, out var bitmap))
+                {
+                    // Decode synchronously on UI thread, limited to MaxDecodesPerFrame per frame
+                    // to avoid blowing the frame budget. Remaining tiles show on next frame.
+                    if (decodesThisFrame >= MaxDecodesPerFrame)
+                    {
+                        continue; // defer to next frame
+                    }
+                    try
+                    {
+                        using var ms = new MemoryStream(tileBytes);
+                        bitmap = new Bitmap(ms);
+                        while (_tileBitmapEviction.Count >= TileBitmapCacheMax)
+                        {
+                            var old = _tileBitmapEviction.Dequeue();
+                            if (_tileBitmapCache.Remove(old, out var oldBmp))
+                                try { oldBmp.Dispose(); } catch { }
+                        }
+                        _tileBitmapCache[bitmapKey] = bitmap;
+                        _tileBitmapEviction.Enqueue(bitmapKey);
+                        decodesThisFrame++;
+                    }
+                    catch { continue; }
                 }
-                catch { continue; }
 
                 try
                 {
@@ -999,11 +1040,7 @@ public class DrawingContextMapControl : Control, ISharedMapControl
                     if (tileW <= 0 || tileH <= 0) continue;
 
                     // The camera transform flips Y (world Y-up → screen Y-down).
-                    // DrawImage places bitmap row-0 at dstRect.Top.
-                    // After the camera flip, dstRect.Top (= tileMinN, south) appears at
-                    // screen top → tile would display upside-down.
-                    // Apply an additional Y-flip around the tile centre to correct this
-                    // (same technique as DrawBackgroundImage).
+                    // Apply an additional Y-flip around the tile centre to correct this.
                     double cx = (tileMinE + tileMaxE) / 2.0;
                     double cy = (tileMinN + tileMaxN) / 2.0;
                     var flip = Matrix.CreateTranslation(-cx, -cy)
@@ -1017,10 +1054,7 @@ public class DrawingContextMapControl : Control, ISharedMapControl
                         context.DrawImage(bitmap, src, dst);
                     }
                 }
-                finally
-                {
-                    bitmap.Dispose();
-                }
+                catch { /* tile geometry error, skip */ }
             }
         }
     }

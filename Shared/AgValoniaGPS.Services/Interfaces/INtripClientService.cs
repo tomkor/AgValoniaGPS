@@ -143,5 +143,6 @@ public class NtripConnectionEventArgs : EventArgs
 public class RtcmDataReceivedEventArgs : EventArgs
 {
     public int BytesReceived { get; set; }
+    public byte[] Data { get; set; } = Array.Empty<byte>();
     public DateTime Timestamp { get; set; } = DateTime.Now;
 }

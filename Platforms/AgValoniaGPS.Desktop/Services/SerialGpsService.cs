@@ -96,6 +96,22 @@ public class SerialGpsService : ISerialGpsService, IDisposable
         return Task.CompletedTask;
     }
 
+    public Task WriteAsync(byte[] data)
+    {
+        var port = _port;
+        if (port == null || !port.IsOpen || data.Length == 0)
+            return Task.CompletedTask;
+        try
+        {
+            port.Write(data, 0, data.Length);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write to serial port");
+        }
+        return Task.CompletedTask;
+    }
+
     private void DisconnectInternal()
     {
         if (_port == null) return;
@@ -118,11 +134,13 @@ public class SerialGpsService : ISerialGpsService, IDisposable
 
     private void OnDataReceived(object sender, SerialDataReceivedEventArgs e)
     {
-        if (_port == null || !_port.IsOpen) return;
+        // Capture local reference to avoid race with DisconnectInternal setting _port = null
+        var port = _port;
+        if (port == null || !port.IsOpen) return;
 
         try
         {
-            var text = _port.ReadExisting();
+            var text = port.ReadExisting();
             _lineBuffer.Append(text);
 
             var buf = _lineBuffer.ToString();
