@@ -20,6 +20,7 @@ using System.IO;
 using System.Text.Json;
 using AgValoniaGPS.Models;
 using AgValoniaGPS.Models.Configuration;
+using AgValoniaGPS.Models.TileMap;
 using AgValoniaGPS.Services.Interfaces;
 
 namespace AgValoniaGPS.Services;
@@ -304,6 +305,11 @@ public class ConfigurationService(
         store.Display.ExtraGuidelines = settings.ExtraGuidelines;
         store.Display.ExtraGuidelinesCount = settings.ExtraGuidelinesCount;
         store.Display.FieldTextureVisible = settings.FieldTextureVisible;
+        store.Display.TileMapEnabled = settings.TileMapEnabled;
+        store.Display.TileMapSource = Enum.TryParse<TileSource>(settings.TileMapSource, out var ts)
+            ? ts : TileSource.OpenStreetMap;
+        store.Display.TileMapOpacity = settings.TileMapOpacity;
+        store.Display.TileMapCustomUrl = settings.TileMapCustomUrl;
         store.Display.AutoSteerSound = settings.AutoSteerSound;
         store.Display.UTurnSound = settings.UTurnSound;
         store.Display.HydraulicSound = settings.HydraulicSound;
@@ -330,6 +336,8 @@ public class ConfigurationService(
         store.Connections.AgShareEnabled = settings.AgShareEnabled;
         store.Connections.GpsUpdateRate = settings.GpsUpdateRate;
         store.Connections.UseRtk = settings.UseRtk;
+        store.Connections.BluetoothGpsEnabled = settings.BluetoothGpsEnabled;
+        store.Connections.BluetoothDeviceName = settings.BluetoothDeviceName;
 
         // Hotkey bindings
         if (settings.HotkeyBindings.Count > 0)
@@ -365,6 +373,10 @@ public class ConfigurationService(
         settings.ExtraGuidelines = store.Display.ExtraGuidelines;
         settings.ExtraGuidelinesCount = store.Display.ExtraGuidelinesCount;
         settings.FieldTextureVisible = store.Display.FieldTextureVisible;
+        settings.TileMapEnabled = store.Display.TileMapEnabled;
+        settings.TileMapSource = store.Display.TileMapSource.ToString();
+        settings.TileMapOpacity = store.Display.TileMapOpacity;
+        settings.TileMapCustomUrl = store.Display.TileMapCustomUrl;
         settings.AutoSteerSound = store.Display.AutoSteerSound;
         settings.UTurnSound = store.Display.UTurnSound;
         settings.HydraulicSound = store.Display.HydraulicSound;
@@ -391,6 +403,8 @@ public class ConfigurationService(
         settings.AgShareEnabled = store.Connections.AgShareEnabled;
         settings.GpsUpdateRate = store.Connections.GpsUpdateRate;
         settings.UseRtk = store.Connections.UseRtk;
+        settings.BluetoothGpsEnabled = store.Connections.BluetoothGpsEnabled;
+        settings.BluetoothDeviceName = store.Connections.BluetoothDeviceName;
 
         // Simulator config
         settings.SimulatorEnabled = store.Simulator.Enabled;

@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 using System;
+using AgValoniaGPS.Models.TileMap;
 using ReactiveUI;
 
 namespace AgValoniaGPS.Models.Configuration;
@@ -217,6 +218,35 @@ public class DisplayConfig : ReactiveObject
     {
         get => _fieldTextureVisible;
         set => this.RaiseAndSetIfChanged(ref _fieldTextureVisible, value);
+    }
+
+    // Tile map (OSM / custom XYZ)
+    private bool _tileMapEnabled;
+    public bool TileMapEnabled
+    {
+        get => _tileMapEnabled;
+        set => this.RaiseAndSetIfChanged(ref _tileMapEnabled, value);
+    }
+
+    private TileSource _tileMapSource = TileSource.OpenStreetMap;
+    public TileSource TileMapSource
+    {
+        get => _tileMapSource;
+        set => this.RaiseAndSetIfChanged(ref _tileMapSource, value);
+    }
+
+    private double _tileMapOpacity = 1.0;
+    public double TileMapOpacity
+    {
+        get => _tileMapOpacity;
+        set => this.RaiseAndSetIfChanged(ref _tileMapOpacity, Math.Clamp(value, 0.1, 1.0));
+    }
+
+    private string _tileMapCustomUrl = string.Empty;
+    public string TileMapCustomUrl
+    {
+        get => _tileMapCustomUrl;
+        set => this.RaiseAndSetIfChanged(ref _tileMapCustomUrl, value);
     }
 
     private bool _extraGuidelines;

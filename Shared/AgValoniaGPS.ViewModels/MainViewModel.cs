@@ -75,6 +75,7 @@ public partial class MainViewModel : ReactiveObject
     private readonly IElevationLogService _elevationLogService;
     private readonly ILogger<MainViewModel> _logger;
     private readonly ApplicationState _appState;
+    private readonly IGpsBluetoothService? _bluetoothGpsService;
     private readonly DispatcherTimer _simulatorTimer;
 
     /// <summary>
@@ -166,7 +167,8 @@ public partial class MainViewModel : ReactiveObject
         IAudioService audioService,
         IElevationLogService elevationLogService,
         ILogger<MainViewModel> logger,
-        ApplicationState appState)
+        ApplicationState appState,
+        IGpsBluetoothService? bluetoothGpsService = null)
     {
         _logger = logger;
         _udpService = udpService;
@@ -198,8 +200,16 @@ public partial class MainViewModel : ReactiveObject
         _audioService = audioService;
         _elevationLogService = elevationLogService;
         _appState = appState;
+        _bluetoothGpsService = bluetoothGpsService;
         _nmeaParser = new NmeaParserService(gpsService);
         _fieldPlaneFileService = new FieldPlaneFileService();
+
+        // Wire BLE GPS → NMEA parser
+        if (_bluetoothGpsService != null)
+        {
+            _bluetoothGpsService.NmeaLineReceived += (_, sentence) =>
+                _nmeaParser.ParseSentence(sentence);
+        }
 
         // Subscribe to events
         _gpsService.GpsDataUpdated += OnGpsDataUpdated;

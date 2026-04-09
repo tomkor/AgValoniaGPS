@@ -23,7 +23,7 @@ public class SettingsValidationTests
         var fixes = settings.ValidateAndFix();
 
         Assert.That(fixes, Has.Count.GreaterThan(0));
-        Assert.That(settings.SimulatorLongitude, Is.EqualTo(-74.006).Within(0.001));
+        Assert.That(settings.SimulatorLongitude, Is.EqualTo(22.6793416).Within(0.001));
     }
 
     [Test]
@@ -33,7 +33,7 @@ public class SettingsValidationTests
         var fixes = settings.ValidateAndFix();
 
         Assert.That(fixes, Has.Count.GreaterThan(0));
-        Assert.That(settings.SimulatorLatitude, Is.EqualTo(40.7128).Within(0.001));
+        Assert.That(settings.SimulatorLatitude, Is.EqualTo(50.0563434).Within(0.001));
     }
 
     [Test]

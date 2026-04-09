@@ -28,8 +28,11 @@ using Avalonia.Rendering.SceneGraph;
 using Avalonia.Skia;
 using Avalonia.Threading;
 using AgValoniaGPS.Models;
+using AgValoniaGPS.Models.Base;
 using AgValoniaGPS.Models.Coverage;
+using AgValoniaGPS.Models.State;
 using AgValoniaGPS.Models.Track;
+using AgValoniaGPS.Services.TileMap;
 using SkiaSharp;
 
 // For loading embedded resources
@@ -625,6 +628,12 @@ public class DrawingContextMapControl : Control, ISharedMapControl
                 DrawBackgroundImage(context);
             }
 
+            // Draw OSM/XYZ tile layer (on top of background image, below all vector overlays)
+            if (AgValoniaGPS.Models.Configuration.ConfigurationStore.Instance.Display.TileMapEnabled)
+            {
+                DrawTileLayer(context, viewWidth, viewHeight);
+            }
+
             // Draw grid (if visible)
             if (IsGridVisible)
             {
@@ -899,6 +908,120 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             var sourceRect = new Rect(0, 0, _backgroundImage.PixelSize.Width, _backgroundImage.PixelSize.Height);
             var destRect = new Rect(_bgMinX, _bgMinY, width, height);
             context.DrawImage(_backgroundImage, sourceRect, destRect);
+        }
+    }
+
+    // ── OSM / XYZ Tile Layer ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Renders OSM-compatible XYZ tiles as the map background.
+    /// Tile coordinate math follows the standard Slippy Map convention.
+    /// Coordinate conversion: local E/N (meters) ↔ WGS84 via GeoConversion.
+    /// </summary>
+    private void DrawTileLayer(DrawingContext context, double viewWidth, double viewHeight)
+    {
+        var tileService = TileMapService.Instance;
+        if (tileService == null) return;
+
+        double originLat = ApplicationState.Instance.Field.OriginLatitude;
+        double originLon = ApplicationState.Instance.Field.OriginLongitude;
+        if (originLat == 0 && originLon == 0)
+        {
+            // No field loaded – fall back to current vehicle position as a temporary origin.
+            // The local-plane E/N coordinates are relative to this origin (vehicle ≈ 0,0),
+            // so tiles will display correctly around the current GPS position.
+            originLat = ApplicationState.Instance.Vehicle.Latitude;
+            originLon = ApplicationState.Instance.Vehicle.Longitude;
+        }
+        if (originLat == 0 && originLon == 0) return; // No GPS fix yet
+
+        // Pick OSM zoom level so that each tile is a reasonable number of screen pixels.
+        // viewWidth is the ground width visible on screen (metres).
+        // Target: ~3 tiles visible across the viewport so each tile renders near its native
+        // 256 px resolution.  At equator: tileMeters = 40075016/2^z, so we solve
+        //   z = log2(40075016 * 3 / viewWidth) ≈ 26.84 − log2(viewWidth)
+        // We round up slightly (constant 27) to bias toward sharper tiles.
+        int osmZoom = Math.Clamp((int)(27.0 - Math.Log2(Math.Max(viewWidth, 1.0))), 10, 18);
+
+        var geo = new GeoConversion(originLat, originLon);
+
+        // Camera centre in WGS84
+        var (centerLat, centerLon) = geo.ToWgs84(new Vec2(_cameraX, _cameraY));
+        var (centerTX, centerTY) = tileService.LatLonToTile(centerLat, centerLon, osmZoom);
+
+        // How many tiles fit in each direction (add margin for rotation)
+        double tileMeters = 40075016.686 / (1 << osmZoom); // tile width at equator in metres
+        int radiusX = Math.Min((int)Math.Ceiling(viewWidth  / tileMeters) + 2, 5);
+        int radiusY = Math.Min((int)Math.Ceiling(viewHeight / tileMeters) + 2, 5);
+
+        int n = 1 << osmZoom;
+        double opacity = AgValoniaGPS.Models.Configuration.ConfigurationStore.Instance.Display.TileMapOpacity;
+
+        using var _ = context.PushOpacity(opacity);
+
+        for (int dtx = -radiusX; dtx <= radiusX; dtx++)
+        {
+            int tx = centerTX + dtx;
+            if (tx < 0 || tx >= n) continue;
+
+            for (int dty = -radiusY; dty <= radiusY; dty++)
+            {
+                int ty = centerTY + dty;
+                if (ty < 0 || ty >= n) continue;
+
+                Stream? stream = tileService.GetTile(osmZoom, tx, ty, () =>
+                    Dispatcher.UIThread.Post(InvalidateVisual));
+
+                if (stream == null) continue;
+
+                Bitmap? bitmap = null;
+                try
+                {
+                    using (stream)
+                        bitmap = new Bitmap(stream);
+                }
+                catch { continue; }
+
+                try
+                {
+                    var (nwLat, nwLon, seLat, seLon) = tileService.TileBounds(tx, ty, osmZoom);
+
+                    Vec2 nw = geo.ToLocal(nwLat, nwLon);
+                    Vec2 se = geo.ToLocal(seLat, seLon);
+
+                    double tileMinE = nw.Easting;
+                    double tileMaxE = se.Easting;
+                    double tileMinN = se.Northing;   // south edge
+                    double tileMaxN = nw.Northing;   // north edge
+                    double tileW    = tileMaxE - tileMinE;
+                    double tileH    = tileMaxN - tileMinN;
+
+                    if (tileW <= 0 || tileH <= 0) continue;
+
+                    // The camera transform flips Y (world Y-up → screen Y-down).
+                    // DrawImage places bitmap row-0 at dstRect.Top.
+                    // After the camera flip, dstRect.Top (= tileMinN, south) appears at
+                    // screen top → tile would display upside-down.
+                    // Apply an additional Y-flip around the tile centre to correct this
+                    // (same technique as DrawBackgroundImage).
+                    double cx = (tileMinE + tileMaxE) / 2.0;
+                    double cy = (tileMinN + tileMaxN) / 2.0;
+                    var flip = Matrix.CreateTranslation(-cx, -cy)
+                             * Matrix.CreateScale(1.0, -1.0)
+                             * Matrix.CreateTranslation(cx, cy);
+
+                    using (context.PushTransform(flip))
+                    {
+                        var src = new Rect(0, 0, bitmap.PixelSize.Width, bitmap.PixelSize.Height);
+                        var dst = new Rect(tileMinE, tileMinN, tileW, tileH);
+                        context.DrawImage(bitmap, src, dst);
+                    }
+                }
+                finally
+                {
+                    bitmap.Dispose();
+                }
+            }
         }
     }
 

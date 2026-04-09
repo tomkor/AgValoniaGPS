@@ -34,6 +34,7 @@ namespace AgValoniaGPS.ViewModels;
 public partial class ConfigurationViewModel : ReactiveObject
 {
     private readonly IConfigurationService _configService;
+    private readonly IGpsBluetoothService? _bluetoothGpsService;
 
     #region Dialog Visibility
 
@@ -42,6 +43,34 @@ public partial class ConfigurationViewModel : ReactiveObject
     {
         get => _isDialogVisible;
         set => this.RaiseAndSetIfChanged(ref _isDialogVisible, value);
+    }
+
+    #endregion
+
+    #region BLE GPS State
+
+    private bool _isBluetoothConnected;
+    public bool IsBluetoothConnected
+    {
+        get => _isBluetoothConnected;
+        set => this.RaiseAndSetIfChanged(ref _isBluetoothConnected, value);
+    }
+
+    private bool _isBluetoothScanning;
+    public bool IsBluetoothScanning
+    {
+        get => _isBluetoothScanning;
+        set => this.RaiseAndSetIfChanged(ref _isBluetoothScanning, value);
+    }
+
+    private ObservableCollection<string> _bluetoothDevices = new();
+    public ObservableCollection<string> BluetoothDevices => _bluetoothDevices;
+
+    private string? _selectedBluetoothDevice;
+    public string? SelectedBluetoothDevice
+    {
+        get => _selectedBluetoothDevice;
+        set => this.RaiseAndSetIfChanged(ref _selectedBluetoothDevice, value);
     }
 
     #endregion
@@ -894,6 +923,12 @@ public partial class ConfigurationViewModel : ReactiveObject
     public ICommand ToggleReverseDetectionCommand { get; private set; } = null!;
     public ICommand ToggleAlarmStopsAutosteerCommand { get; private set; } = null!;
 
+    // BLE GPS Commands
+    public ICommand ScanBluetoothDevicesCommand { get; private set; } = null!;
+    public ICommand ConnectBluetoothDeviceCommand { get; private set; } = null!;
+    public ICommand DisconnectBluetoothCommand { get; private set; } = null!;
+    public ICommand ToggleBluetoothGpsCommand { get; private set; } = null!;
+
     // Roll Tab Commands
     public ICommand EditRollZeroCommand { get; private set; } = null!;
     public ICommand EditRollFilterCommand { get; private set; } = null!;
@@ -930,6 +965,7 @@ public partial class ConfigurationViewModel : ReactiveObject
     public event Action<bool>? FullscreenChanged;
     public ICommand ToggleElevationLogCommand { get; private set; } = null!;
     public ICommand ToggleFieldTextureCommand { get; private set; } = null!;
+    public ICommand ToggleTileMapCommand { get; private set; } = null!;
     public ICommand ToggleGridCommand { get; private set; } = null!;
     public ICommand ToggleExtraGuidelinesCommand { get; private set; } = null!;
     public ICommand EditExtraGuidelinesCountCommand { get; private set; } = null!;
@@ -958,9 +994,20 @@ public partial class ConfigurationViewModel : ReactiveObject
 
     #endregion
 
-    public ConfigurationViewModel(IConfigurationService configService)
+    public ConfigurationViewModel(IConfigurationService configService,
+        IGpsBluetoothService? bluetoothGpsService = null)
     {
         _configService = configService;
+        _bluetoothGpsService = bluetoothGpsService;
+
+        // Subscribe to BLE connection state changes
+        if (_bluetoothGpsService != null)
+        {
+            _bluetoothGpsService.ConnectionStateChanged += (_, connected) =>
+            {
+                IsBluetoothConnected = connected;
+            };
+        }
 
         // Initialize commands
         LoadProfileCommand = ReactiveCommand.Create<string>(LoadProfile);
@@ -1395,6 +1442,50 @@ public partial class ConfigurationViewModel : ReactiveObject
             Connections.RtkLostAction = Connections.RtkLostAction == 1 ? 0 : 1;
             Config.MarkChanged();
         });
+
+        // BLE GPS Commands
+        ToggleBluetoothGpsCommand = ReactiveCommand.Create(() =>
+        {
+            Connections.BluetoothGpsEnabled = !Connections.BluetoothGpsEnabled;
+            Config.MarkChanged();
+        });
+
+        ScanBluetoothDevicesCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            if (_bluetoothGpsService == null) return;
+            IsBluetoothScanning = true;
+            _bluetoothDevices.Clear();
+            try
+            {
+                var devices = await _bluetoothGpsService.ScanForDevicesAsync();
+                foreach (var d in devices)
+                    _bluetoothDevices.Add(d);
+                if (_bluetoothDevices.Count == 0)
+                    _bluetoothDevices.Add("(No devices found)");
+            }
+            finally
+            {
+                IsBluetoothScanning = false;
+            }
+        });
+
+        ConnectBluetoothDeviceCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            if (_bluetoothGpsService == null || string.IsNullOrEmpty(SelectedBluetoothDevice)) return;
+            if (SelectedBluetoothDevice == "(No devices found)") return;
+            var connected = await _bluetoothGpsService.ConnectAsync(SelectedBluetoothDevice);
+            if (connected)
+            {
+                Connections.BluetoothDeviceName = SelectedBluetoothDevice;
+                Config.MarkChanged();
+            }
+        });
+
+        DisconnectBluetoothCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            if (_bluetoothGpsService == null) return;
+            await _bluetoothGpsService.DisconnectAsync();
+        });
     }
 
     private void InitializeRollEditCommands()
@@ -1571,6 +1662,12 @@ public partial class ConfigurationViewModel : ReactiveObject
         ToggleFieldTextureCommand = ReactiveCommand.Create(() =>
         {
             Display.FieldTextureVisible = !Display.FieldTextureVisible;
+            Config.MarkChanged();
+        });
+
+        ToggleTileMapCommand = ReactiveCommand.Create(() =>
+        {
+            Display.TileMapEnabled = !Display.TileMapEnabled;
             Config.MarkChanged();
         });
 

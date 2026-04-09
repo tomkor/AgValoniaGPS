@@ -37,6 +37,10 @@ namespace AgValoniaGPS.Models
         public bool ExtraGuidelines { get; set; } = false;
         public int ExtraGuidelinesCount { get; set; } = 10;
         public bool FieldTextureVisible { get; set; } = true;
+        public bool TileMapEnabled { get; set; } = false;
+        public string TileMapSource { get; set; } = "OpenStreetMap";
+        public double TileMapOpacity { get; set; } = 1.0;
+        public string TileMapCustomUrl { get; set; } = string.Empty;
         public bool AutoSteerSound { get; set; } = true;
         public bool UTurnSound { get; set; } = true;
         public bool HydraulicSound { get; set; } = true;
@@ -70,14 +74,16 @@ namespace AgValoniaGPS.Models
 
         // Simulator settings
         public bool SimulatorEnabled { get; set; } = true;
-        public double SimulatorLatitude { get; set; } = 40.7128;
-        public double SimulatorLongitude { get; set; } = -74.0060;
+        public double SimulatorLatitude { get; set; } = 50.0563434;
+        public double SimulatorLongitude { get; set; } = 22.6793416;
         public double SimulatorSpeed { get; set; } = 0.0;
         public double SimulatorSteerAngle { get; set; } = 0.0;
 
         // GPS settings
         public int GpsUpdateRate { get; set; } = 10; // Hz
         public bool UseRtk { get; set; } = true;
+        public bool BluetoothGpsEnabled { get; set; } = false;
+        public string BluetoothDeviceName { get; set; } = string.Empty;
 
         // Field management
         public string FieldsDirectory { get; set; } = string.Empty; // Will default to Documents/AgValoniaGPS/Fields

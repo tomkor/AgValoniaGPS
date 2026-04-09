@@ -212,4 +212,19 @@ public class ConnectionConfig : ReactiveObject
         get => _maxHdop;
         set => this.RaiseAndSetIfChanged(ref _maxHdop, value);
     }
+
+    // BLE GPS
+    private bool _bluetoothGpsEnabled;
+    public bool BluetoothGpsEnabled
+    {
+        get => _bluetoothGpsEnabled;
+        set => this.RaiseAndSetIfChanged(ref _bluetoothGpsEnabled, value);
+    }
+
+    private string _bluetoothDeviceName = string.Empty;
+    public string BluetoothDeviceName
+    {
+        get => _bluetoothDeviceName;
+        set => this.RaiseAndSetIfChanged(ref _bluetoothDeviceName, value);
+    }
 }

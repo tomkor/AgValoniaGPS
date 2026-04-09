@@ -29,10 +29,12 @@ using AgValoniaGPS.Services.Coverage;
 using AgValoniaGPS.Services.Logging;
 using AgValoniaGPS.Services.Section;
 using AgValoniaGPS.Services.Tram;
+using AgValoniaGPS.Services.TileMap;
 using AgValoniaGPS.ViewModels;
 using AgValoniaGPS.Models;
 using AgValoniaGPS.Models.State;
 using AgValoniaGPS.Desktop.Services;
+using AgValoniaGPS.Services.Interfaces;
 
 namespace AgValoniaGPS.Desktop.DependencyInjection;
 
@@ -129,9 +131,15 @@ public static class ServiceCollectionExtensions
         // Elevation log service (#120)
         services.AddSingleton<IElevationLogService, ElevationLogService>();
 
+        // Tile map service (OSM/XYZ tile download and caching)
+        services.AddSingleton<ITileMapService, TileMapService>();
+
         // Platform-specific services (Desktop implementations)
         services.AddSingleton<MapService>();
         services.AddSingleton<IMapService>(sp => sp.GetRequiredService<MapService>());
+
+        // BLE GPS service (Nordic UART Service for ArduSimple and similar devices)
+        services.AddSingleton<IGpsBluetoothService, BluetoothGpsService>();
 
         return services;
     }
@@ -147,5 +155,8 @@ public static class ServiceCollectionExtensions
         var autoSteerService = serviceProvider.GetRequiredService<IAutoSteerService>();
 
         udpService?.SetAutoSteerService(autoSteerService);
+
+        // Eagerly instantiate TileMapService so its static Instance is set before the first render
+        serviceProvider.GetRequiredService<ITileMapService>();
     }
 }

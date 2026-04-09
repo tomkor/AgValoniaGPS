@@ -285,6 +285,98 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
                 </Button>
             </Grid>
 
+            <!-- BLUETOOTH GPS -->
+            <TextBlock Text="Bluetooth GPS" FontSize="14" FontWeight="SemiBold"
+                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"
+                       Margin="0,8,0,0"/>
+
+            <Border Classes="SettingsPanel">
+                <StackPanel Spacing="8">
+                    <!-- Enable BLE GPS toggle -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel>
+                            <TextBlock Text="Bluetooth LE GPS" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+                            <TextBlock Text="Nordic UART Service (ArduSimple, u-blox BLE)" FontSize="10"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumHighBrush}"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Classes="ToggleButton"
+                                Background="{Binding Connections.BluetoothGpsEnabled, Converter={x:Static conv:BoolToToggleBackgroundConverter.Instance}}"
+                                BorderBrush="{Binding Connections.BluetoothGpsEnabled, Converter={x:Static conv:BoolToToggleBorderConverter.Instance}}"
+                                Command="{Binding ToggleBluetoothGpsCommand}">
+                            <TextBlock Text="Enable" FontSize="12"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+                        </Button>
+                    </Grid>
+
+                    <!-- Connection status + paired device name -->
+                    <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding Connections.BluetoothGpsEnabled}">
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock FontSize="11"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumHighBrush}"
+                                       Text="{Binding IsBluetoothConnected,
+                                              Converter={x:Static conv:BoolToStringConverter.Instance},
+                                              ConverterParameter='Connected|Not connected'}"/>
+                            <TextBlock Text="{Binding Connections.BluetoothDeviceName}"
+                                       FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+                        </StackPanel>
+                        <!-- Green/grey status dot -->
+                        <Border Grid.Column="1" CornerRadius="12" Width="20" Height="20"
+                                VerticalAlignment="Center"
+                                Background="{Binding IsBluetoothConnected, Converter={x:Static conv:BoolToToggleBackgroundConverter.Instance}}"/>
+                    </Grid>
+
+                    <!-- Scan + Device List (only when BLE enabled) -->
+                    <StackPanel Spacing="6" IsVisible="{Binding Connections.BluetoothGpsEnabled}">
+                        <Grid ColumnDefinitions="*,8,Auto">
+                            <Button Grid.Column="0" Classes="ActionButton"
+                                    Command="{Binding ScanBluetoothDevicesCommand}"
+                                    IsEnabled="{Binding !IsBluetoothScanning}"
+                                    HorizontalAlignment="Stretch">
+                                <TextBlock HorizontalAlignment="Center"
+                                           Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"
+                                           Text="{Binding IsBluetoothScanning,
+                                                  Converter={x:Static conv:BoolToStringConverter.Instance},
+                                                  ConverterParameter='Scanning…|Scan Devices'}"/>
+                            </Button>
+                            <Button Grid.Column="2" Classes="ActionButton"
+                                    Command="{Binding DisconnectBluetoothCommand}"
+                                    IsEnabled="{Binding IsBluetoothConnected}">
+                                <TextBlock Text="Disconnect"
+                                           Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+                            </Button>
+                        </Grid>
+
+                        <!-- Device list (shown after scan) -->
+                        <ListBox ItemsSource="{Binding BluetoothDevices}"
+                                 SelectedItem="{Binding SelectedBluetoothDevice, Mode=TwoWay}"
+                                 MaxHeight="120"
+                                 IsVisible="{Binding BluetoothDevices.Count,
+                                             Converter={x:Static conv:GreaterThanConverter.Instance},
+                                             ConverterParameter=0}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}"
+                                               Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"
+                                               Padding="4,2"/>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <Button Classes="ActionButton"
+                                Command="{Binding ConnectBluetoothDeviceCommand}"
+                                IsEnabled="{Binding BluetoothDevices.Count,
+                                            Converter={x:Static conv:GreaterThanConverter.Instance},
+                                            ConverterParameter=0}"
+                                HorizontalAlignment="Stretch">
+                            <TextBlock Text="Connect Selected" HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
         </StackPanel>
     </ScrollViewer>
 </UserControl>

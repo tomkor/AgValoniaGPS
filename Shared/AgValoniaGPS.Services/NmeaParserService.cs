@@ -41,6 +41,15 @@ public class NmeaParserService
     private double _previousHeading;
     private bool _hasPreviousPosition;
 
+    // Buffered data from standard NMEA GGA sentence (combined with RMC on each epoch)
+    private double _ggaLat;
+    private double _ggaLon;
+    private byte _ggaFix;
+    private int _ggaSats;
+    private double _ggaHdop = 99.0;
+    private float _ggaAlt;
+    private bool _hasGgaData;
+
     /// <summary>
     /// Raised when IMU data is received (roll, pitch, yaw rate).
     /// </summary>
@@ -96,6 +105,15 @@ public class NmeaParserService
         else if (words[0] == "$PAOGI" && words.Length > 14)
         {
             ParsePAOGI(words);
+        }
+        // Standard NMEA: $GxGGA / $GxRMC  (Gx = GP, GN, GL, GA, GB, GI, GQ...)
+        else if (words[0].Length == 6 && words[0][0] == '$' && words[0].EndsWith("GGA", StringComparison.Ordinal) && words.Length >= 10)
+        {
+            ParseGGA(words);
+        }
+        else if (words[0].Length == 6 && words[0][0] == '$' && words[0].EndsWith("RMC", StringComparison.Ordinal) && words.Length >= 9)
+        {
+            ParseRMC(words);
         }
     }
 
@@ -255,6 +273,100 @@ public class NmeaParserService
     {
         // PAOGI has same format as PANDA
         ParsePANDA(words);
+    }
+
+    /// <summary>
+    /// Parse standard NMEA $GxGGA sentence.
+    /// Stores position, fix quality, HDOP and altitude for combination with RMC.
+    /// </summary>
+    private void ParseGGA(string[] words)
+    {
+        /*
+         GGA: (1) UTC time, (2,3) lat, (4,5) lon,
+              (6) fix quality, (7) sats, (8) HDOP, (9) altitude M
+        */
+        try
+        {
+            if (string.IsNullOrEmpty(words[2]) || string.IsNullOrEmpty(words[3])) return;
+            if (string.IsNullOrEmpty(words[4]) || string.IsNullOrEmpty(words[5])) return;
+
+            _ggaLat = ParseLatitude(words[2], words[3]);
+            _ggaLon = ParseLongitude(words[4], words[5]);
+
+            byte.TryParse(words[6], NumberStyles.Float, CultureInfo.InvariantCulture, out _ggaFix);
+            int.TryParse(words[7], NumberStyles.Float, CultureInfo.InvariantCulture, out _ggaSats);
+            double.TryParse(words[8], NumberStyles.Float, CultureInfo.InvariantCulture, out _ggaHdop);
+            float.TryParse(words[9], NumberStyles.Float, CultureInfo.InvariantCulture, out _ggaAlt);
+
+            _hasGgaData = true;
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Parse standard NMEA $GxRMC sentence.
+    /// Combines with buffered GGA data and calls UpdateGpsData.
+    /// </summary>
+    private void ParseRMC(string[] words)
+    {
+        /*
+         RMC: (1) UTC time, (2) Status A/V, (3,4) lat, (5,6) lon,
+              (7) speed knots, (8) track angle degrees
+        */
+        try
+        {
+            if (!_hasGgaData) return;
+
+            // Status must be active
+            if (words.Length < 3 || words[2] != "A") return;
+
+            double speedMs = 0;
+            if (float.TryParse(words[7], NumberStyles.Float, CultureInfo.InvariantCulture, out float speedKnots))
+                speedMs = speedKnots * 0.514444;
+
+            double gpsHeading = 0;
+            double.TryParse(words[8], NumberStyles.Float, CultureInfo.InvariantCulture, out gpsHeading);
+
+            var gpsData = new GpsData
+            {
+                FixQuality = _ggaFix,
+                SatellitesInUse = _ggaSats,
+                Hdop = _ggaHdop,
+                Timestamp = DateTime.Now
+            };
+            gpsData.CurrentPosition = gpsData.CurrentPosition with
+            {
+                Latitude = _ggaLat,
+                Longitude = _ggaLon,
+                Altitude = _ggaAlt,
+                Speed = speedMs
+            };
+
+            // Heading processing (single-antenna fix-to-fix)
+            double finalHeading = ProcessHeading(gpsHeading, speedMs,
+                gpsData.CurrentPosition.Easting, gpsData.CurrentPosition.Northing);
+            gpsData.CurrentPosition = gpsData.CurrentPosition with { Heading = finalHeading };
+            FusedHeading = finalHeading;
+
+            int minFixQuality = Connections.MinFixQuality;
+            bool isFixAcceptable = _ggaFix >= minFixQuality;
+            bool isHdopAcceptable = _ggaHdop <= Connections.MaxHdop;
+
+            if (!isFixAcceptable || !isHdopAcceptable)
+            {
+                ConsecutiveBadFixes++;
+                gpsData.IsValid = false;
+                if (ConsecutiveBadFixes == 1 || ConsecutiveBadFixes % 10 == 0)
+                    FixQualityBelowMinimum?.Invoke(this, _ggaFix);
+                _gpsService.UpdateGpsData(gpsData);
+                return;
+            }
+
+            ConsecutiveBadFixes = 0;
+            gpsData.IsValid = true;
+            _gpsService.UpdateGpsData(gpsData);
+        }
+        catch { }
     }
 
     private double ParseLatitude(string latString, string hemisphere)
