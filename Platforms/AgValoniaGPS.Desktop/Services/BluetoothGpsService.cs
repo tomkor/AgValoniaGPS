@@ -16,6 +16,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -38,9 +39,9 @@ namespace AgValoniaGPS.Desktop.Services;
 public class BluetoothGpsService : IGpsBluetoothService, IDisposable
 {
     private static readonly BluetoothUuid NusServiceUuid =
-        BluetoothUuid.Parse("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
+        BluetoothUuid.FromGuid(new Guid("6E400001-B5A3-F393-E0A9-E50E24DCCA9E"));
     private static readonly BluetoothUuid NusTxCharUuid =
-        BluetoothUuid.Parse("6E400003-B5A3-F393-E0A9-E50E24DCCA9E");
+        BluetoothUuid.FromGuid(new Guid("6E400003-B5A3-F393-E0A9-E50E24DCCA9E"));
 
     private readonly ILogger<BluetoothGpsService> _logger;
 
@@ -65,7 +66,8 @@ public class BluetoothGpsService : IGpsBluetoothService, IDisposable
 
     /// <summary>
     /// Scan for nearby BLE devices advertising the Nordic UART Service.
-    /// Scan duration is ~8 seconds. Returns list of device names found.
+    /// Also includes already-paired devices. Scan duration is ~8 seconds.
+    /// Returns list of device names found.
     /// </summary>
     public async Task<IList<string>> ScanForDevicesAsync(CancellationToken cancellationToken = default)
     {
@@ -74,8 +76,39 @@ public class BluetoothGpsService : IGpsBluetoothService, IDisposable
         IsScanning = true;
         _scannedDevices.Clear();
 
+        _logger.LogInformation("BLE scan starting on {OS}", RuntimeInformation.OSDescription);
+
         try
         {
+            // Check Bluetooth availability
+            var available = await Bluetooth.GetAvailabilityAsync().ConfigureAwait(false);
+            _logger.LogInformation("BLE availability: {Available}", available);
+            if (!available)
+            {
+                _logger.LogWarning("BLE not available on this system – check Bluetooth is enabled and app has permission");
+                return Array.Empty<string>();
+            }
+
+            // Include already-paired devices first
+            try
+            {
+                var paired = await Bluetooth.GetPairedDevicesAsync().ConfigureAwait(false);
+                _logger.LogInformation("BLE paired devices count: {Count}", paired.Count);
+                foreach (var d in paired)
+                {
+                    if (string.IsNullOrEmpty(d.Name)) continue;
+                    lock (_scannedDevices)
+                    {
+                        _scannedDevices[d.Name] = d;
+                    }
+                    _logger.LogInformation("BLE paired device: {Name}", d.Name);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "BLE GetPairedDevicesAsync failed");
+            }
+
             // Register advertisement handler
             void OnAdvertisement(object? sender, BluetoothAdvertisingEvent e)
             {
@@ -84,26 +117,43 @@ public class BluetoothGpsService : IGpsBluetoothService, IDisposable
                 {
                     _scannedDevices[e.Name] = e.Device;
                 }
-                _logger.LogDebug("BLE discovered: {Name}", e.Name);
+                _logger.LogInformation("BLE advertisement received: {Name}", e.Name);
             }
 
             Bluetooth.AdvertisementReceived += OnAdvertisement;
 
+            BluetoothLEScan? scan = null;
             try
             {
-                // Start scanning – AcceptAllAdvertisements so we see devices
-                // even if they don't advertise NUS in the advertisement PDU
-                await Bluetooth.RequestLeScanAsync(new RequestLeScanOptions
+                _logger.LogInformation("BLE calling RequestLEScanAsync…");
+                // RequestLEScanAsync returns a scan object that MUST be kept alive –
+                // the scan runs only as long as this object is referenced.
+                // On some platforms (macOS) this may throw – fall back to paired-only mode.
+                try
                 {
-                    AcceptAllAdvertisements = true
-                });
-
-                // Wait for scan duration or cancellation
-                await Task.Delay(8000, cancellationToken).ConfigureAwait(false);
+                    scan = await Bluetooth.RequestLEScanAsync(new BluetoothLEScanOptions
+                    {
+                        AcceptAllAdvertisements = true
+                    }).ConfigureAwait(false);
+                    _logger.LogInformation("BLE scan started, waiting 10 s…");
+                    await Task.Delay(10000, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception scanEx)
+                {
+                    _logger.LogWarning(scanEx, "BLE RequestLEScanAsync failed ({Type}), using paired-devices only", scanEx.GetType().Name);
+                    // Still wait briefly so paired devices list is returned
+                    await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+                }
             }
             finally
             {
+                scan?.Stop();
                 Bluetooth.AdvertisementReceived -= OnAdvertisement;
+                _logger.LogInformation("BLE scan stopped, found {Count} device(s)", _scannedDevices.Count);
             }
         }
         catch (OperationCanceledException)
@@ -112,7 +162,7 @@ public class BluetoothGpsService : IGpsBluetoothService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "BLE scan error");
+            _logger.LogError(ex, "BLE scan error – {Type}: {Message}", ex.GetType().Name, ex.Message);
         }
         finally
         {
@@ -225,7 +275,7 @@ public class BluetoothGpsService : IGpsBluetoothService, IDisposable
 
     private void OnCharacteristicValueChanged(object? sender, GattCharacteristicValueChangedEventArgs e)
     {
-        var text = Encoding.ASCII.GetString(e.Value.ToArray());
+        var text = Encoding.ASCII.GetString(e.Value);
         _lineBuffer.Append(text);
 
         // Extract complete NMEA lines (delimited by \n or \r\n)

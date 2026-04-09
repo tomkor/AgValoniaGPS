@@ -84,6 +84,9 @@ namespace AgValoniaGPS.Models
         public bool UseRtk { get; set; } = true;
         public bool BluetoothGpsEnabled { get; set; } = false;
         public string BluetoothDeviceName { get; set; } = string.Empty;
+        public bool SerialGpsEnabled { get; set; } = false;
+        public string SerialPortName { get; set; } = string.Empty;
+        public int SerialBaudRate { get; set; } = 115200;
 
         // Field management
         public string FieldsDirectory { get; set; } = string.Empty; // Will default to Documents/AgValoniaGPS/Fields

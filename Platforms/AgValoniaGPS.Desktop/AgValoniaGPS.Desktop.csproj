@@ -31,6 +31,13 @@
     <None Include="Assets\Images\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- macOS: copy Info.plist next to the executable so CoreBluetooth permission dialog appears -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <Content Include="Info.plist">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.9" />
     <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.9" />

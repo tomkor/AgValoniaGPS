@@ -327,8 +327,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
                                 Background="{Binding IsBluetoothConnected, Converter={x:Static conv:BoolToToggleBackgroundConverter.Instance}}"/>
                     </Grid>
 
-                    <!-- Scan + Device List (only when BLE enabled) -->
-                    <StackPanel Spacing="6" IsVisible="{Binding Connections.BluetoothGpsEnabled}">
+                    <!-- Scan + Device List (always visible when BLE section open) -->
+                    <StackPanel Spacing="6">
                         <Grid ColumnDefinitions="*,8,Auto">
                             <Button Grid.Column="0" Classes="ActionButton"
                                     Command="{Binding ScanBluetoothDevicesCommand}"
@@ -338,7 +338,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
                                            Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"
                                            Text="{Binding IsBluetoothScanning,
                                                   Converter={x:Static conv:BoolToStringConverter.Instance},
-                                                  ConverterParameter='Scanning…|Scan Devices'}"/>
+                                                  ConverterParameter='Scanning… (10s)|Scan Devices'}"/>
                             </Button>
                             <Button Grid.Column="2" Classes="ActionButton"
                                     Command="{Binding DisconnectBluetoothCommand}"
@@ -347,6 +347,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
                                            Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
                             </Button>
                         </Grid>
+
+                        <!-- Scan status / error message -->
+                        <TextBlock Text="{Binding BleScanStatus}"
+                                   FontSize="10" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource SystemControlForegroundBaseMediumHighBrush}"
+                                   IsVisible="{Binding BleScanStatus,
+                                               Converter={x:Static conv:StringNotEmptyConverter.Instance}}"/>
 
                         <!-- Device list (shown after scan) -->
                         <ListBox ItemsSource="{Binding BluetoothDevices}"
@@ -369,6 +376,104 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
                                 IsEnabled="{Binding BluetoothDevices.Count,
                                             Converter={x:Static conv:GreaterThanConverter.Instance},
                                             ConverterParameter=0}"
+                                HorizontalAlignment="Stretch">
+                            <TextBlock Text="Connect Selected" HorizontalAlignment="Center"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- SERIAL (USB) GPS -->
+            <TextBlock Text="Serial (USB) GPS" FontSize="14" FontWeight="SemiBold"
+                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"
+                       Margin="0,8,0,0"/>
+
+            <Border Classes="SettingsPanel">
+                <StackPanel Spacing="8">
+                    <!-- Enable Serial GPS toggle -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel>
+                            <TextBlock Text="Serial / USB GPS" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+                            <TextBlock Text="u-blox, ArduSimple, any NMEA serial device" FontSize="10"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumHighBrush}"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Classes="ToggleButton"
+                                Background="{Binding Connections.SerialGpsEnabled, Converter={x:Static conv:BoolToToggleBackgroundConverter.Instance}}"
+                                BorderBrush="{Binding Connections.SerialGpsEnabled, Converter={x:Static conv:BoolToToggleBorderConverter.Instance}}"
+                                Command="{Binding ToggleSerialGpsCommand}">
+                            <TextBlock Text="Enable" FontSize="12"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+                        </Button>
+                    </Grid>
+
+                    <!-- Connection status (always visible) -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock FontSize="11"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumHighBrush}"
+                                       Text="{Binding IsSerialConnected,
+                                              Converter={x:Static conv:BoolToStringConverter.Instance},
+                                              ConverterParameter='Connected|Not connected'}"/>
+                            <TextBlock Text="{Binding Connections.SerialPortName}"
+                                       FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"
+                                       IsVisible="{Binding IsSerialConnected}"/>
+                        </StackPanel>
+                        <Border Grid.Column="1" CornerRadius="12" Width="20" Height="20"
+                                VerticalAlignment="Center"
+                                Background="{Binding IsSerialConnected, Converter={x:Static conv:BoolToToggleBackgroundConverter.Instance}}"/>
+                    </Grid>
+
+                    <!-- Port + baud selection (always visible) -->
+                    <StackPanel Spacing="6">
+                        <!-- Refresh ports + Disconnect -->
+                        <Grid ColumnDefinitions="*,8,Auto">
+                            <Button Grid.Column="0" Classes="ActionButton"
+                                    Command="{Binding RefreshSerialPortsCommand}"
+                                    HorizontalAlignment="Stretch">
+                                <TextBlock Text="Refresh Ports" HorizontalAlignment="Center"
+                                           Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+                            </Button>
+                            <Button Grid.Column="2" Classes="ActionButton"
+                                    Command="{Binding DisconnectSerialCommand}"
+                                    IsEnabled="{Binding IsSerialConnected}">
+                                <TextBlock Text="Disconnect"
+                                           Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+                            </Button>
+                        </Grid>
+
+                        <!-- Port list -->
+                        <ListBox ItemsSource="{Binding SerialPorts}"
+                                 SelectedItem="{Binding SelectedSerialPort, Mode=TwoWay}"
+                                 MaxHeight="100"
+                                 IsVisible="{Binding SerialPorts.Count,
+                                             Converter={x:Static conv:GreaterThanConverter.Instance},
+                                             ConverterParameter=0}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}"
+                                               Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"
+                                               Padding="4,2"/>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+
+                        <!-- Baud rate -->
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBlock Text="Baud Rate" FontSize="11" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
+                            <ComboBox Grid.Column="1"
+                                      ItemsSource="{Binding BaudRates}"
+                                      SelectedItem="{Binding Connections.SerialBaudRate, Mode=TwoWay}"
+                                      MinWidth="110"/>
+                        </Grid>
+
+                        <!-- Connect button — requires Enable toggle ON -->
+                        <Button Classes="ActionButton"
+                                Command="{Binding ConnectSerialDeviceCommand}"
+                                IsEnabled="{Binding Connections.SerialGpsEnabled}"
                                 HorizontalAlignment="Stretch">
                             <TextBlock Text="Connect Selected" HorizontalAlignment="Center"
                                        Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>

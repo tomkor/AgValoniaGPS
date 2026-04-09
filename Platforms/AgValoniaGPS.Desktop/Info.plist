@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.agvaloniaagps.desktop</string>
+    <key>CFBundleName</key>
+    <string>AgValoniaGPS</string>
+    <key>CFBundleDisplayName</key>
+    <string>AgValoniaGPS</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>26.2.0</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>AgValoniaGPS needs Bluetooth to connect to BLE GPS receivers (ArduSimple, u-blox).</string>
+    <key>NSBluetoothPeripheralUsageDescription</key>
+    <string>AgValoniaGPS needs Bluetooth to connect to BLE GPS receivers (ArduSimple, u-blox).</string>
+</dict>
+</plist>

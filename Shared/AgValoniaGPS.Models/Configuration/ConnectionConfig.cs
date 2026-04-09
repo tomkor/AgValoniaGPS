@@ -227,4 +227,26 @@ public class ConnectionConfig : ReactiveObject
         get => _bluetoothDeviceName;
         set => this.RaiseAndSetIfChanged(ref _bluetoothDeviceName, value);
     }
+
+    // Serial (USB) GPS
+    private bool _serialGpsEnabled;
+    public bool SerialGpsEnabled
+    {
+        get => _serialGpsEnabled;
+        set => this.RaiseAndSetIfChanged(ref _serialGpsEnabled, value);
+    }
+
+    private string _serialPortName = string.Empty;
+    public string SerialPortName
+    {
+        get => _serialPortName;
+        set => this.RaiseAndSetIfChanged(ref _serialPortName, value);
+    }
+
+    private int _serialBaudRate = 115200;
+    public int SerialBaudRate
+    {
+        get => _serialBaudRate;
+        set => this.RaiseAndSetIfChanged(ref _serialBaudRate, value);
+    }
 }

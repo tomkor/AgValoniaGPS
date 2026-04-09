@@ -141,6 +141,9 @@ public static class ServiceCollectionExtensions
         // BLE GPS service (Nordic UART Service for ArduSimple and similar devices)
         services.AddSingleton<IGpsBluetoothService, BluetoothGpsService>();
 
+        // Serial GPS service (USB COM port for u-blox, ArduSimple, etc.)
+        services.AddSingleton<ISerialGpsService, SerialGpsService>();
+
         return services;
     }
 

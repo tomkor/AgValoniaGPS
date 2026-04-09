@@ -338,6 +338,9 @@ public class ConfigurationService(
         store.Connections.UseRtk = settings.UseRtk;
         store.Connections.BluetoothGpsEnabled = settings.BluetoothGpsEnabled;
         store.Connections.BluetoothDeviceName = settings.BluetoothDeviceName;
+        store.Connections.SerialGpsEnabled = settings.SerialGpsEnabled;
+        store.Connections.SerialPortName = settings.SerialPortName;
+        store.Connections.SerialBaudRate = settings.SerialBaudRate;
 
         // Hotkey bindings
         if (settings.HotkeyBindings.Count > 0)
@@ -405,6 +408,9 @@ public class ConfigurationService(
         settings.UseRtk = store.Connections.UseRtk;
         settings.BluetoothGpsEnabled = store.Connections.BluetoothGpsEnabled;
         settings.BluetoothDeviceName = store.Connections.BluetoothDeviceName;
+        settings.SerialGpsEnabled = store.Connections.SerialGpsEnabled;
+        settings.SerialPortName = store.Connections.SerialPortName;
+        settings.SerialBaudRate = store.Connections.SerialBaudRate;
 
         // Simulator config
         settings.SimulatorEnabled = store.Simulator.Enabled;

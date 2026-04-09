@@ -35,6 +35,7 @@ public partial class ConfigurationViewModel : ReactiveObject
 {
     private readonly IConfigurationService _configService;
     private readonly IGpsBluetoothService? _bluetoothGpsService;
+    private readonly ISerialGpsService? _serialGpsService;
 
     #region Dialog Visibility
 
@@ -72,6 +73,37 @@ public partial class ConfigurationViewModel : ReactiveObject
         get => _selectedBluetoothDevice;
         set => this.RaiseAndSetIfChanged(ref _selectedBluetoothDevice, value);
     }
+
+    private string _bleScanStatus = string.Empty;
+    public string BleScanStatus
+    {
+        get => _bleScanStatus;
+        set => this.RaiseAndSetIfChanged(ref _bleScanStatus, value);
+    }
+
+    #endregion
+
+    #region Serial GPS State
+
+    private bool _isSerialConnected;
+    public bool IsSerialConnected
+    {
+        get => _isSerialConnected;
+        set => this.RaiseAndSetIfChanged(ref _isSerialConnected, value);
+    }
+
+    private ObservableCollection<string> _serialPorts = new();
+    public ObservableCollection<string> SerialPorts => _serialPorts;
+
+    private string? _selectedSerialPort;
+    public string? SelectedSerialPort
+    {
+        get => _selectedSerialPort;
+        set => this.RaiseAndSetIfChanged(ref _selectedSerialPort, value);
+    }
+
+    private static readonly int[] KnownBaudRates = { 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600 };
+    public int[] BaudRates => KnownBaudRates;
 
     #endregion
 
@@ -929,6 +961,12 @@ public partial class ConfigurationViewModel : ReactiveObject
     public ICommand DisconnectBluetoothCommand { get; private set; } = null!;
     public ICommand ToggleBluetoothGpsCommand { get; private set; } = null!;
 
+    // Serial GPS Commands
+    public ICommand RefreshSerialPortsCommand { get; private set; } = null!;
+    public ICommand ConnectSerialDeviceCommand { get; private set; } = null!;
+    public ICommand DisconnectSerialCommand { get; private set; } = null!;
+    public ICommand ToggleSerialGpsCommand { get; private set; } = null!;
+
     // Roll Tab Commands
     public ICommand EditRollZeroCommand { get; private set; } = null!;
     public ICommand EditRollFilterCommand { get; private set; } = null!;
@@ -995,10 +1033,12 @@ public partial class ConfigurationViewModel : ReactiveObject
     #endregion
 
     public ConfigurationViewModel(IConfigurationService configService,
-        IGpsBluetoothService? bluetoothGpsService = null)
+        IGpsBluetoothService? bluetoothGpsService = null,
+        ISerialGpsService? serialGpsService = null)
     {
         _configService = configService;
         _bluetoothGpsService = bluetoothGpsService;
+        _serialGpsService = serialGpsService;
 
         // Subscribe to BLE connection state changes
         if (_bluetoothGpsService != null)
@@ -1007,6 +1047,17 @@ public partial class ConfigurationViewModel : ReactiveObject
             {
                 IsBluetoothConnected = connected;
             };
+        }
+
+        // Subscribe to Serial GPS connection state changes
+        if (_serialGpsService != null)
+        {
+            _serialGpsService.ConnectionStateChanged += (_, connected) =>
+            {
+                IsSerialConnected = connected;
+            };
+            // Pre-populate port list immediately so user sees available ports on dialog open
+            RefreshSerialPortsInternal();
         }
 
         // Initialize commands
@@ -1452,8 +1503,13 @@ public partial class ConfigurationViewModel : ReactiveObject
 
         ScanBluetoothDevicesCommand = ReactiveCommand.CreateFromTask(async () =>
         {
-            if (_bluetoothGpsService == null) return;
+            if (_bluetoothGpsService == null)
+            {
+                BleScanStatus = "BLE service not available on this platform.";
+                return;
+            }
             IsBluetoothScanning = true;
+            BleScanStatus = string.Empty;
             _bluetoothDevices.Clear();
             try
             {
@@ -1461,7 +1517,19 @@ public partial class ConfigurationViewModel : ReactiveObject
                 foreach (var d in devices)
                     _bluetoothDevices.Add(d);
                 if (_bluetoothDevices.Count == 0)
+                {
+                    BleScanStatus = "No devices found. On macOS: check System Settings → Privacy & Security → Bluetooth — the app must be allowed. If the entry is missing, try running the app once from the terminal.";
                     _bluetoothDevices.Add("(No devices found)");
+                }
+                else
+                {
+                    BleScanStatus = $"Found {_bluetoothDevices.Count} device(s). Select one and press Connect Selected.";
+                }
+            }
+            catch (Exception ex)
+            {
+                BleScanStatus = $"Scan error: {ex.Message}";
+                _bluetoothDevices.Add("(No devices found)");
             }
             finally
             {
@@ -1486,6 +1554,57 @@ public partial class ConfigurationViewModel : ReactiveObject
             if (_bluetoothGpsService == null) return;
             await _bluetoothGpsService.DisconnectAsync();
         });
+
+        // Serial GPS Commands
+        ToggleSerialGpsCommand = ReactiveCommand.Create(() =>
+        {
+            Connections.SerialGpsEnabled = !Connections.SerialGpsEnabled;
+            Config.MarkChanged();
+            if (Connections.SerialGpsEnabled)
+                RefreshSerialPortsInternal();
+        });
+
+        RefreshSerialPortsCommand = ReactiveCommand.Create(() => RefreshSerialPortsInternal());
+
+        ConnectSerialDeviceCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            if (_serialGpsService == null || string.IsNullOrEmpty(SelectedSerialPort)) return;
+            if (SelectedSerialPort == "(No ports found)") return;
+            var connected = await _serialGpsService.ConnectAsync(SelectedSerialPort, Connections.SerialBaudRate);
+            if (connected)
+            {
+                Connections.SerialPortName = SelectedSerialPort;
+                Config.MarkChanged();
+            }
+        });
+
+        DisconnectSerialCommand = ReactiveCommand.CreateFromTask(async () =>
+        {
+            if (_serialGpsService == null) return;
+            await _serialGpsService.DisconnectAsync();
+        });
+    }
+
+    private void RefreshSerialPortsInternal()
+    {
+        _serialPorts.Clear();
+        if (_serialGpsService == null) return;
+
+        foreach (var port in _serialGpsService.GetAvailablePorts())
+            _serialPorts.Add(port);
+
+        if (_serialPorts.Count == 0)
+        {
+            _serialPorts.Add("(No ports found)");
+            return;
+        }
+
+        // Pre-select the previously saved port if still present, otherwise first available
+        var savedPort = Connections.SerialPortName;
+        if (!string.IsNullOrEmpty(savedPort) && _serialPorts.Contains(savedPort))
+            SelectedSerialPort = savedPort;
+        else
+            SelectedSerialPort = _serialPorts[0];
     }
 
     private void InitializeRollEditCommands()
