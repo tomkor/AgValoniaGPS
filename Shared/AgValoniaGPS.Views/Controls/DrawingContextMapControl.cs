@@ -945,14 +945,16 @@ public class DrawingContextMapControl : Control, ISharedMapControl
 
         // Pick tile zoom level so that each tile covers a reasonable ground area.
         // viewWidth is the ground width visible on screen (metres).
-        // Formula: z = log2(40075016 * 3 / viewWidth) ≈ 26.84 − log2(viewWidth)
-        // Max zoom depends on source: OSM caps at 18, ESRI at 19, Geoportal WMS at 20
-        // (Geoportal is WMS — any zoom works; higher zoom = smaller tiles = sharper detail).
+        // For 256 px tiles: z ≈ 27 − log2(viewWidth).
+        // Geoportal WMS tiles are 512 px (+1 zoom level bias) and support up to zoom 20.
+        // ESRI XYZ tiles support up to zoom 19; OSM up to 18.
         var tileSource = AgValoniaGPS.Models.Configuration.ConfigurationStore.Instance.Display.TileMapSource;
-        int maxZoom = tileSource == AgValoniaGPS.Models.TileMap.TileSource.GeoportalOrto ? 20
+        bool isGeoportal = tileSource == AgValoniaGPS.Models.TileMap.TileSource.GeoportalOrto;
+        int maxZoom = isGeoportal ? 20
                     : tileSource == AgValoniaGPS.Models.TileMap.TileSource.EsriWorldImagery ? 19
                     : 18;
-        int osmZoom = Math.Clamp((int)(27.0 - Math.Log2(Math.Max(viewWidth, 1.0))), 10, maxZoom);
+        double zoomBias = isGeoportal ? 28.0 : 27.0; // 512 px tiles need +1 bias
+        int osmZoom = Math.Clamp((int)(zoomBias - Math.Log2(Math.Max(viewWidth, 1.0))), 10, maxZoom);
 
         var geo = new GeoConversion(originLat, originLon);
 

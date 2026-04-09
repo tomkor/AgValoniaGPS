@@ -213,7 +213,7 @@ public class TileMapService : ITileMapService
         return GeoportalWmsBase +
                "?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap" +
                "&LAYERS=Raster&STYLES=&CRS=CRS:84" +
-               $"&BBOX={bbox}&WIDTH=256&HEIGHT=256&FORMAT=image/jpeg";
+               $"&BBOX={bbox}&WIDTH=512&HEIGHT=512&FORMAT=image/jpeg";
     }
 
     private async Task LoadTileAsync(int z, int x, int y, string key, string diskPath)
