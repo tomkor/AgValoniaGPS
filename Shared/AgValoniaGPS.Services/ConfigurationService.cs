@@ -310,6 +310,7 @@ public class ConfigurationService(
             ? ts : TileSource.OpenStreetMap;
         store.Display.TileMapOpacity = settings.TileMapOpacity;
         store.Display.TileMapCustomUrl = settings.TileMapCustomUrl;
+        store.Display.EwidencjaEnabled = settings.EwidencjaEnabled;
         store.Display.AutoSteerSound = settings.AutoSteerSound;
         store.Display.UTurnSound = settings.UTurnSound;
         store.Display.HydraulicSound = settings.HydraulicSound;
@@ -380,6 +381,7 @@ public class ConfigurationService(
         settings.TileMapSource = store.Display.TileMapSource.ToString();
         settings.TileMapOpacity = store.Display.TileMapOpacity;
         settings.TileMapCustomUrl = store.Display.TileMapCustomUrl;
+        settings.EwidencjaEnabled = store.Display.EwidencjaEnabled;
         settings.AutoSteerSound = store.Display.AutoSteerSound;
         settings.UTurnSound = store.Display.UTurnSound;
         settings.HydraulicSound = store.Display.HydraulicSound;

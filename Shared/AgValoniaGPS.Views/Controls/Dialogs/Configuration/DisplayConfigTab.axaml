@@ -248,6 +248,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
                                     </Button>
                                     <TextBlock Text="Geoportal" Foreground="{DynamicResource SystemControlForegroundBaseMediumHighBrush}" FontSize="10" HorizontalAlignment="Center"/>
                                 </StackPanel>
+                                <!-- EGiB cadastral overlay -->
+                                <StackPanel Spacing="2">
+                                    <Button Classes="DisplayToggle" Width="60" Height="60"
+                                            Background="{Binding Display.EwidencjaEnabled, Converter={x:Static conv:BoolToToggleBackgroundConverter.Instance}}"
+                                            BorderBrush="{Binding Display.EwidencjaEnabled, Converter={x:Static conv:BoolToToggleBorderConverter.Instance}}"
+                                            Command="{Binding ToggleEwidencjaCommand}">
+                                        <TextBlock Text="EGiB" FontSize="12" FontWeight="Bold"
+                                                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                   TextAlignment="Center"/>
+                                    </Button>
+                                    <TextBlock Text="Działki" Foreground="{DynamicResource SystemControlForegroundBaseMediumHighBrush}" FontSize="10" HorizontalAlignment="Center"/>
+                                </StackPanel>
                             </StackPanel>
                             <TextBlock Text="Map Tiles" Foreground="{DynamicResource SystemControlForegroundBaseMediumHighBrush}" FontSize="11" HorizontalAlignment="Center"/>
                         </StackPanel>

@@ -265,6 +265,13 @@ public class DisplayConfig : ReactiveObject
         set => this.RaiseAndSetIfChanged(ref _tileMapCustomUrl, value);
     }
 
+    private bool _ewidencjaEnabled;
+    public bool EwidencjaEnabled
+    {
+        get => _ewidencjaEnabled;
+        set => this.RaiseAndSetIfChanged(ref _ewidencjaEnabled, value);
+    }
+
     private bool _extraGuidelines;
     public bool ExtraGuidelines
     {

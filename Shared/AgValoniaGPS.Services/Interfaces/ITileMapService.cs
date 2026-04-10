@@ -41,6 +41,12 @@ public interface ITileMapService
     /// </summary>
     (double nwLat, double nwLon, double seLat, double seLon) TileBounds(int x, int y, int z);
 
+    /// <summary>
+    /// Returns raw PNG bytes (with alpha) for the EGiB overlay tile, or null if not yet cached.
+    /// Only valid at zoom >= 17 — returns null immediately for lower zoom levels.
+    /// </summary>
+    byte[]? GetEwidencjaTile(int z, int x, int y, Action onLoaded);
+
     /// <summary>Drop all entries from the in-memory bitmap cache.</summary>
     void ClearMemoryCache();
 }

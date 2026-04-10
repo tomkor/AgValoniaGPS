@@ -41,6 +41,7 @@ namespace AgValoniaGPS.Models
         public string TileMapSource { get; set; } = "OpenStreetMap";
         public double TileMapOpacity { get; set; } = 1.0;
         public string TileMapCustomUrl { get; set; } = string.Empty;
+        public bool EwidencjaEnabled { get; set; } = false;
         public bool AutoSteerSound { get; set; } = true;
         public bool UTurnSound { get; set; } = true;
         public bool HydraulicSound { get; set; } = true;

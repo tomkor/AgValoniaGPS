@@ -1006,6 +1006,7 @@ public partial class ConfigurationViewModel : ReactiveObject
     public ICommand ToggleFieldTextureCommand { get; private set; } = null!;
     public ICommand ToggleTileMapCommand { get; private set; } = null!;
     public ICommand SetTileSourceCommand { get; private set; } = null!;
+    public ICommand ToggleEwidencjaCommand { get; private set; } = null!;
     public ICommand ToggleGridCommand { get; private set; } = null!;
     public ICommand ToggleExtraGuidelinesCommand { get; private set; } = null!;
     public ICommand EditExtraGuidelinesCountCommand { get; private set; } = null!;
@@ -1807,6 +1808,12 @@ public partial class ConfigurationViewModel : ReactiveObject
                 _           => TileSource.OpenStreetMap
             };
             Display.TileMapEnabled = true;
+            Config.MarkChanged();
+        });
+
+        ToggleEwidencjaCommand = ReactiveCommand.Create(() =>
+        {
+            Display.EwidencjaEnabled = !Display.EwidencjaEnabled;
             Config.MarkChanged();
         });
 

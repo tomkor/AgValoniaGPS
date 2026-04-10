@@ -39,9 +39,16 @@ public class TileMapService : ITileMapService
     public static TileMapService? Instance => _instance;
 
     // ── URL templates ─────────────────────────────────────────────────────────
-    private const string OsmUrlTemplate   = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-    private const string EsriUrlTemplate  = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-    private const string GeoportalWmsBase = "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution";
+    private const string OsmUrlTemplate    = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+    private const string EsriUrlTemplate   = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+    private const string GeoportalWmsBase  = "https://mapy.geoportal.gov.pl/wss/service/PZGIK/ORTO/WMS/HighResolution";
+    private const string EwidencjaWmsBase  = "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaEwidencjiGruntow";
+    private const int    EwidencjaMinZoom  = 17; // layer not visible at coarser zoom levels
+    // Gutter pixels added around the tile BBOX so WMS renders features crossing tile boundaries.
+    // Adjacent tiles then share a continuous rendering zone → no gaps in parcel boundary lines.
+    internal const int EgibCorePx   = 512;
+    internal const int EgibBufferPx = 104;  // ~20% gutter on each side
+    internal const int EgibTotalPx  = EgibCorePx + 2 * EgibBufferPx; // 720
 
     private const int ByteCacheMax     = 256;   // max tiles kept in memory (raw bytes)
     private const int MaxConcurrent    = 4;     // parallel downloads
@@ -141,6 +148,113 @@ public class TileMapService : ITileMapService
             _evictionQueue.Clear();
         }
         _failedTiles.Clear();
+    }
+
+    /// <inheritdoc/>
+    public byte[]? GetEwidencjaTile(int z, int x, int y, Action onLoaded)
+    {
+        if (z < EwidencjaMinZoom) return null;
+
+        string key = $"egib/{z}/{x}/{y}";
+
+        if (_byteCache.TryGetValue(key, out var cached))
+            return cached;
+
+        if (_failedTiles.TryGetValue(key, out var retryAfter) && DateTime.UtcNow < retryAfter)
+            return null;
+
+        string diskPath = Path.Combine(_cacheRoot, $"egib_{EgibTotalPx}", z.ToString(), x.ToString(), $"{y}.png");
+        if (_pending.TryAdd(key, true))
+        {
+            RegisterCallback(key, onLoaded);
+            _ = LoadEwidencjaTileAsync(z, x, y, key, diskPath);
+        }
+        else
+        {
+            RegisterCallback(key, onLoaded);
+        }
+
+        return null;
+    }
+
+    private async Task LoadEwidencjaTileAsync(int z, int x, int y, string key, string diskPath)
+    {
+        if (File.Exists(diskPath))
+        {
+            try
+            {
+                var bytes = await File.ReadAllBytesAsync(diskPath).ConfigureAwait(false);
+                PutByteCache(key, bytes);
+                _pending.TryRemove(key, out _);
+                FireCallbacks(key);
+                return;
+            }
+            catch
+            {
+                try { File.Delete(diskPath); } catch { }
+            }
+        }
+
+        await _downloadSem.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            string url = BuildEwidencjaWmsUrl(z, x, y);
+            using var response = await _http.GetAsync(url, HttpCompletionOption.ResponseContentRead).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+            if (!contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"Unexpected content type: {contentType}");
+
+            byte[] data = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(diskPath)!);
+                await File.WriteAllBytesAsync(diskPath, data).ConfigureAwait(false);
+            }
+            catch { }
+
+            PutByteCache(key, data);
+            FireCallbacks(key);
+        }
+        catch
+        {
+            _failedTiles[key] = DateTime.UtcNow.AddSeconds(FailCooldownSec);
+            ClearCallbacks(key);
+        }
+        finally
+        {
+            _pending.TryRemove(key, out _);
+            _downloadSem.Release();
+        }
+    }
+
+    private static string BuildEwidencjaWmsUrl(int z, int x, int y)
+    {
+        // Use EPSG:3857 (Web Mercator) — axis order is always X=east, Y=north,
+        // BBOX = xMin,yMin,xMax,yMax with no ambiguity, and tile boundaries are
+        // exact integers that match the XYZ tile grid perfectly.
+        const double halfCircle = 20037508.3427892;
+        double tileSize = halfCircle * 2.0 / (1 << z);
+
+        double xMin = x * tileSize - halfCircle;
+        double xMax = xMin + tileSize;
+        double yMax = halfCircle - y * tileSize;
+        double yMin = yMax - tileSize;
+
+        // Add gutter so features crossing tile boundaries are fully rendered.
+        double buf = tileSize * (double)EgibBufferPx / EgibCorePx;
+
+        string bbox = string.Format(CultureInfo.InvariantCulture,
+            "{0:F2},{1:F2},{2:F2},{3:F2}",
+            xMin - buf, yMin - buf, xMax + buf, yMax + buf);
+
+        return EwidencjaWmsBase +
+               "?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap" +
+               "&LAYERS=dzialki,numery_dzialek&STYLES=" +
+               "&CRS=EPSG:3857" +
+               $"&BBOX={bbox}&WIDTH={EgibTotalPx}&HEIGHT={EgibTotalPx}&FORMAT=image/png&TRANSPARENT=TRUE";
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

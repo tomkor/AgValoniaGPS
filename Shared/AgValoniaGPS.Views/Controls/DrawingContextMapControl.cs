@@ -224,6 +224,11 @@ public class DrawingContextMapControl : Control, ISharedMapControl
     // Max new bitmap decodes per render frame to avoid frame budget overrun
     private const int MaxDecodesPerFrame = 2;
 
+    // EGiB overlay bitmap cache (separate from base layer cache)
+    private readonly Dictionary<string, Bitmap> _egibBitmapCache = new();
+    private readonly Queue<string> _egibBitmapEviction = new();
+    private const int EgibBitmapCacheMax = 128;
+
     // Camera/viewport state
     private double _cameraX = 0.0;
     private double _cameraY = 0.0;
@@ -637,9 +642,16 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             }
 
             // Draw OSM/XYZ tile layer (on top of background image, below all vector overlays)
-            if (AgValoniaGPS.Models.Configuration.ConfigurationStore.Instance.Display.TileMapEnabled)
+            var display = AgValoniaGPS.Models.Configuration.ConfigurationStore.Instance.Display;
+            if (display.TileMapEnabled)
             {
                 DrawTileLayer(context, viewWidth, viewHeight);
+            }
+
+            // Draw EGiB cadastral overlay (działki + numery działek), only at high zoom
+            if (display.EwidencjaEnabled)
+            {
+                DrawEwidencjaLayer(context, viewWidth, viewHeight);
             }
 
             // Draw grid (if visible)
@@ -1057,6 +1069,124 @@ public class DrawingContextMapControl : Control, ISharedMapControl
                     }
                 }
                 catch { /* tile geometry error, skip */ }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Draws the EGiB cadastral overlay (działki + numery działek) on top of the base tile layer.
+    /// Only renders at zoom >= 17 where the WMS layer is visible.
+    /// </summary>
+    private void DrawEwidencjaLayer(DrawingContext context, double viewWidth, double viewHeight)
+    {
+        var tileService = TileMapService.Instance;
+        if (tileService == null) return;
+
+        double originLat = ApplicationState.Instance.Field.OriginLatitude;
+        double originLon = ApplicationState.Instance.Field.OriginLongitude;
+        if (originLat == 0 && originLon == 0)
+        {
+            originLat = ApplicationState.Instance.Vehicle.Latitude;
+            originLon = ApplicationState.Instance.Vehicle.Longitude;
+        }
+        if (originLat == 0 && originLon == 0) return;
+
+        // EGiB only visible at zoom >= 17
+        int zoom = Math.Clamp((int)(28.0 - Math.Log2(Math.Max(viewWidth, 1.0))), 17, 19);
+        if (zoom < 17) return;
+
+        var geo = new GeoConversion(originLat, originLon);
+        var (centerLat, centerLon) = geo.ToWgs84(new Vec2(_cameraX, _cameraY));
+        var (centerTX, centerTY) = tileService.LatLonToTile(centerLat, centerLon, zoom);
+
+        double tileMeters = 40075016.686 / (1 << zoom);
+        int radiusX = Math.Min((int)Math.Ceiling(viewWidth  / tileMeters) + 2, 5);
+        int radiusY = Math.Min((int)Math.Ceiling(viewHeight / tileMeters) + 2, 5);
+        int n = 1 << zoom;
+
+        int decodesThisFrame = 0;
+
+        for (int dtx = -radiusX; dtx <= radiusX; dtx++)
+        {
+            int tx = centerTX + dtx;
+            if (tx < 0 || tx >= n) continue;
+
+            for (int dty = -radiusY; dty <= radiusY; dty++)
+            {
+                int ty = centerTY + dty;
+                if (ty < 0 || ty >= n) continue;
+
+                byte[]? tileBytes = tileService.GetEwidencjaTile(zoom, tx, ty, () =>
+                    Dispatcher.UIThread.Post(InvalidateVisual));
+
+                if (tileBytes == null) continue;
+
+                string bitmapKey = $"egib/{zoom}/{tx}/{ty}";
+
+                if (!_egibBitmapCache.TryGetValue(bitmapKey, out var bitmap))
+                {
+                    if (decodesThisFrame >= MaxDecodesPerFrame) continue;
+                    try
+                    {
+                        using var ms = new MemoryStream(tileBytes);
+                        bitmap = new Bitmap(ms);
+                        while (_egibBitmapEviction.Count >= EgibBitmapCacheMax)
+                        {
+                            var old = _egibBitmapEviction.Dequeue();
+                            if (_egibBitmapCache.Remove(old, out var oldBmp))
+                                try { oldBmp.Dispose(); } catch { }
+                        }
+                        _egibBitmapCache[bitmapKey] = bitmap;
+                        _egibBitmapEviction.Enqueue(bitmapKey);
+                        decodesThisFrame++;
+                    }
+                    catch { continue; }
+                }
+
+                try
+                {
+                    var (nwLat, nwLon, seLat, seLon) = tileService.TileBounds(tx, ty, zoom);
+                    Vec2 nw = geo.ToLocal(nwLat, nwLon);
+                    Vec2 se = geo.ToLocal(seLat, seLon);
+
+                    double tileMinE = nw.Easting;
+                    double tileMaxE = se.Easting;
+                    double tileMinN = se.Northing;
+                    double tileMaxN = nw.Northing;
+                    double tileW    = tileMaxE - tileMinE;
+                    double tileH    = tileMaxN - tileMinN;
+
+                    if (tileW <= 0 || tileH <= 0) continue;
+
+                    double cx = (tileMinE + tileMaxE) / 2.0;
+                    double cy = (tileMinN + tileMaxN) / 2.0;
+                    var flip = Matrix.CreateTranslation(-cx, -cy)
+                             * Matrix.CreateScale(1, -1)
+                             * Matrix.CreateTranslation(cx, cy);
+
+                    // Clip to the exact tile extent FIRST (in world/camera coordinates),
+                    // then push the Y-flip so the bitmap renders with correct orientation.
+                    // Drawing the full 720×720 buffered image into the expanded geographic area
+                    // ensures features crossing tile boundaries are visible, while the clip
+                    // prevents duplicates in adjacent tiles.
+                    // Buffer fraction = EgibBufferPx/EgibCorePx = 104/512 ≈ 0.203
+                    const double bufFrac = 104.0 / 512.0;
+                    double expandE = tileW * bufFrac;
+                    double expandN = tileH * bufFrac;
+
+                    using (context.PushClip(new Rect(tileMinE, tileMinN, tileW, tileH)))
+                    using (context.PushTransform(flip))
+                    {
+                        var src = new Rect(0, 0, 720, 720);
+                        var dst = new Rect(
+                            tileMinE - expandE,
+                            tileMinN - expandN,
+                            tileW + 2 * expandE,
+                            tileH + 2 * expandN);
+                        context.DrawImage(bitmap, src, dst);
+                    }
+                }
+                catch { }
             }
         }
     }
