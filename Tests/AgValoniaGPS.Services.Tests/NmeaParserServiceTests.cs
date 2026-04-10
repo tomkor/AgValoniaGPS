@@ -237,6 +237,28 @@ public class NmeaParserServiceTests
         Assert.That(_lastGpsData!.SatellitesInView, Is.EqualTo(24));
     }
 
+    [Test]
+    public void ParseSentence_MultiConstellationGsv_SumsAllConstellations()
+    {
+        // Typical u-blox ZED-F9P output: separate GSV per constellation before GGA
+        string gpGsv  = RecalculateChecksum("$GPGSV,4,1,13,01,40,083,46,02,17,308,41,12,07,344,39,14,22,228,45");
+        string glGsv  = RecalculateChecksum("$GLGSV,2,1,07,65,40,200,42,66,28,155,38,67,18,070,33,72,14,318,41");
+        string gaGsv  = RecalculateChecksum("$GAGSV,3,1,09,02,50,123,48,03,35,210,45,07,42,180,44,11,28,090,40");
+        string gga    = RecalculateChecksum("$GNGGA,123519,4807.038,N,01131.000,E,4,21,0.6,545.4,M,46.9,M,,");
+        string rmc    = RecalculateChecksum("$GNRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
+
+        _parser.ParseSentence(gpGsv);
+        _parser.ParseSentence(glGsv);
+        _parser.ParseSentence(gaGsv);
+        _parser.ParseSentence(gga);
+        _parser.ParseSentence(rmc);
+
+        Assert.That(_lastGpsData, Is.Not.Null);
+        Assert.That(_lastGpsData!.SatellitesInUse, Is.EqualTo(21));
+        // 13 (GPS) + 7 (GLONASS) + 9 (Galileo) = 29 total in view
+        Assert.That(_lastGpsData!.SatellitesInView, Is.EqualTo(29));
+    }
+
     #endregion
 
     #region Sentence Too Short

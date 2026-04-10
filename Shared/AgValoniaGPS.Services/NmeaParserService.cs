@@ -46,7 +46,15 @@ public class NmeaParserService
     private double _ggaLon;
     private byte _ggaFix;
     private int _ggaSats;
+    // GSV accumulation — per-constellation satellite counts are summed across the epoch.
+    // _gsvSatsInView holds the committed total for the current epoch (published via RMC/GGA).
+    // _gsvStageAccum accumulates first-message counts as each constellation's GSV arrives.
+    // _gsvSeenIds tracks which sentence prefixes have been seen this epoch.
+    // The stage is committed (→ _gsvSatsInView) when a new GGA arrives, because GGA marks
+    // the start of each 1 Hz NMEA epoch and all GSV messages precede it.
     private int _gsvSatsInView;
+    private int _gsvStageAccum;
+    private readonly System.Collections.Generic.HashSet<string> _gsvSeenIds = new(StringComparer.Ordinal);
     private double _ggaHdop = 99.0;
     private float _ggaAlt;
     private bool _hasGgaData;
@@ -293,6 +301,15 @@ public class NmeaParserService
         */
         try
         {
+            // Commit the GSV stage accumulator: all GSV messages for this epoch have
+            // already arrived (they precede GGA in the standard NMEA output order).
+            if (_gsvStageAccum > 0)
+            {
+                _gsvSatsInView = _gsvStageAccum;
+                _gsvStageAccum = 0;
+                _gsvSeenIds.Clear();
+            }
+
             // Always parse status fields so the UI can show fix quality and satellite count
             // even before a position fix is acquired.
             byte.TryParse(words[6], NumberStyles.Float, CultureInfo.InvariantCulture, out _ggaFix);
@@ -393,16 +410,28 @@ public class NmeaParserService
 
     /// <summary>
     /// Parse standard NMEA $GxGSV sentence.
-    /// Extracts total satellites in view (field 3).
+    ///
+    /// Receivers emit one GSV group per constellation ($GPGSV, $GLGSV, $GAGSV, …).
+    /// The first message of each group (field 2 = "1") carries the total-in-view count for
+    /// that constellation in field 3.  We accumulate those first-message counts into
+    /// _gsvStageAccum; the stage is committed to _gsvSatsInView when the next GGA arrives
+    /// (GGA marks the epoch boundary and follows all GSV messages in standard NMEA order).
     /// </summary>
     private void ParseGSV(string[] words)
     {
         try
         {
-            if (int.TryParse(words[3], NumberStyles.Float, CultureInfo.InvariantCulture, out int satsInView) && satsInView >= 0)
-            {
-                _gsvSatsInView = satsInView;
-            }
+            // words[2] = message number within this constellation's group (1-based)
+            // words[3] = total satellites in view for this constellation
+            if (!int.TryParse(words[2], NumberStyles.None, CultureInfo.InvariantCulture, out int msgNum)) return;
+            if (msgNum != 1) return; // Only the first message carries the total count
+
+            if (!int.TryParse(words[3], NumberStyles.None, CultureInfo.InvariantCulture, out int count) || count < 0) return;
+
+            // Avoid double-counting if the same constellation repeats within one epoch
+            if (!_gsvSeenIds.Add(words[0])) return;
+
+            _gsvStageAccum += count;
         }
         catch { }
     }
