@@ -106,6 +106,20 @@ public partial class ConfigurationViewModel : ReactiveObject
     private static readonly int[] KnownBaudRates = { 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600 };
     public int[] BaudRates => KnownBaudRates;
 
+    public int SelectedBaudRateIndex
+    {
+        get
+        {
+            var idx = Array.IndexOf(KnownBaudRates, Connections.SerialBaudRate);
+            return idx >= 0 ? idx : 5; // default to 115200
+        }
+        set
+        {
+            if (value >= 0 && value < KnownBaudRates.Length)
+                Connections.SerialBaudRate = KnownBaudRates[value];
+        }
+    }
+
     #endregion
 
     #region Numeric Input Dialog
@@ -1800,14 +1814,21 @@ public partial class ConfigurationViewModel : ReactiveObject
 
         SetTileSourceCommand = ReactiveCommand.Create<string>(sourceName =>
         {
-            Display.TileMapSource = sourceName switch
+            var newSource = sourceName switch
             {
                 "esri"      => TileSource.EsriWorldImagery,
                 "geoportal" => TileSource.GeoportalOrto,
                 "custom"    => TileSource.Custom,
                 _           => TileSource.OpenStreetMap
             };
-            Display.TileMapEnabled = true;
+            // Clicking the already-active source toggles the map off
+            if (Display.TileMapEnabled && Display.TileMapSource == newSource)
+                Display.TileMapEnabled = false;
+            else
+            {
+                Display.TileMapSource  = newSource;
+                Display.TileMapEnabled = true;
+            }
             Config.MarkChanged();
         });
 

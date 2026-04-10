@@ -287,16 +287,30 @@ public class NmeaParserService
         */
         try
         {
-            if (string.IsNullOrEmpty(words[2]) || string.IsNullOrEmpty(words[3])) return;
-            if (string.IsNullOrEmpty(words[4]) || string.IsNullOrEmpty(words[5])) return;
-
-            _ggaLat = ParseLatitude(words[2], words[3]);
-            _ggaLon = ParseLongitude(words[4], words[5]);
-
+            // Always parse status fields so the UI can show fix quality and satellite count
+            // even before a position fix is acquired.
             byte.TryParse(words[6], NumberStyles.Float, CultureInfo.InvariantCulture, out _ggaFix);
             int.TryParse(words[7], NumberStyles.Float, CultureInfo.InvariantCulture, out _ggaSats);
             double.TryParse(words[8], NumberStyles.Float, CultureInfo.InvariantCulture, out _ggaHdop);
             float.TryParse(words[9], NumberStyles.Float, CultureInfo.InvariantCulture, out _ggaAlt);
+
+            if (string.IsNullOrEmpty(words[2]) || string.IsNullOrEmpty(words[3]) ||
+                string.IsNullOrEmpty(words[4]) || string.IsNullOrEmpty(words[5]))
+            {
+                // No position fix yet — push a status-only update so the status bar
+                // reflects the current fix quality and satellite count.
+                _gpsService.UpdateGpsData(new GpsData
+                {
+                    FixQuality      = _ggaFix,
+                    SatellitesInUse = _ggaSats,
+                    Hdop            = _ggaHdop,
+                    IsValid         = false
+                });
+                return;
+            }
+
+            _ggaLat = ParseLatitude(words[2], words[3]);
+            _ggaLon = ParseLongitude(words[4], words[5]);
 
             _hasGgaData = true;
         }

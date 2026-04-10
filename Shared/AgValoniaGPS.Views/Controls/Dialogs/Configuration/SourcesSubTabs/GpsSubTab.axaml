@@ -466,7 +466,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
                                        Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
                             <ComboBox Grid.Column="1"
                                       ItemsSource="{Binding BaudRates}"
-                                      SelectedItem="{Binding Connections.SerialBaudRate, Mode=TwoWay}"
+                                      SelectedIndex="{Binding SelectedBaudRateIndex, Mode=TwoWay}"
                                       MinWidth="110"/>
                         </Grid>
 

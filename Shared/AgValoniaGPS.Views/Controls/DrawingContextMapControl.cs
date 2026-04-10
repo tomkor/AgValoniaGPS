@@ -1,4 +1,4 @@
-// AgValoniaGPS
+﻿// AgValoniaGPS
 // Copyright (C) 2024-2025 AgValoniaGPS Contributors
 //
 // This program is free software: you can redistribute it and/or modify
@@ -221,13 +221,15 @@ public class DrawingContextMapControl : Control, ISharedMapControl
     private readonly Dictionary<string, Bitmap> _tileBitmapCache = new();
     private readonly Queue<string> _tileBitmapEviction = new();
     private const int TileBitmapCacheMax = 256;
-    // Max new bitmap decodes per render frame to avoid frame budget overrun
-    private const int MaxDecodesPerFrame = 2;
+    // Keys of tiles being decoded on background threads — avoids duplicate decodes.
+    // All access is on the UI thread (Render + ContinueWith on UI scheduler).
+    private readonly HashSet<string> _pendingTileDecodes = new();
 
     // EGiB overlay bitmap cache (separate from base layer cache)
     private readonly Dictionary<string, Bitmap> _egibBitmapCache = new();
     private readonly Queue<string> _egibBitmapEviction = new();
     private const int EgibBitmapCacheMax = 128;
+    private readonly HashSet<string> _pendingEgibDecodes = new();
 
     // Camera/viewport state
     private double _cameraX = 0.0;
@@ -438,6 +440,7 @@ public class DrawingContextMapControl : Control, ISharedMapControl
     // Flag markers
     private IReadOnlyList<(double Easting, double Northing, string Color, string Name)> _flags = Array.Empty<(double, double, string, string)>();
 
+
     // FPS tracking (instance-based to avoid double-counting when multiple controls exist)
     private DateTime _lastFpsUpdate = DateTime.UtcNow;
     private int _frameCount;
@@ -473,7 +476,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
 
     public DrawingContextMapControl()
     {
-        Debug.WriteLine("[DrawingContextMapControl] Constructor starting...");
 
         // Make control focusable for input
         Focusable = true;
@@ -492,11 +494,9 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             _groundTextureNight = new Bitmap(nightStream);
 
             _groundTexture = _groundTextureDay;
-            Debug.WriteLine("[DrawingContextMapControl] Loaded ground textures (day + night)");
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[DrawingContextMapControl] Ground texture not found: {ex.Message}");
         }
 
         // Initialize pens and brushes
@@ -549,7 +549,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
 
     private void OnRenderTimerTick(object? sender, EventArgs e)
     {
-        // Just trigger render - don't count here (we count actual completed renders)
         InvalidateVisual();
     }
 
@@ -563,7 +562,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
                 if (!_renderTimer.IsEnabled)
                 {
                     _renderTimer.Start();
-                    Console.WriteLine($"[MapControl] Started render timer (control became visible)");
                 }
                 // Track the main visible control for static FPS access
                 _mainControl = this;
@@ -573,7 +571,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
                 if (_renderTimer.IsEnabled)
                 {
                     _renderTimer.Stop();
-                    Console.WriteLine($"[MapControl] Stopped render timer (control hidden)");
                 }
             }
         }
@@ -688,7 +685,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             // Log timing every 60 frames
             if (_renderCounter % 60 == 0)
             {
-                Console.WriteLine($"[Timing] Render: zoom={_zoom:F3}, coverage={covSw.ElapsedMilliseconds}ms, boundary={boundSw.ElapsedMilliseconds}ms");
             }
 
             // Draw headland line (on top of coverage and boundary)
@@ -786,7 +782,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         // Log full render time every 30 frames
         if (++_renderCounter % 30 == 0)
         {
-            Debug.WriteLine($"[Timing] Render: {_lastFullRenderMs:F2}ms, CovDraw: {_lastCoverageRenderMs:F2}ms, Patches: {_lastDrawnPatchCount}");
         }
 
         // Count actual completed renders for accurate FPS
@@ -984,8 +979,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
 
         using var _ = context.PushOpacity(opacity);
 
-        int decodesThisFrame = 0;
-
         for (int dtx = -radiusX; dtx <= radiusX; dtx++)
         {
             int tx = centerTX + dtx;
@@ -1014,27 +1007,42 @@ public class DrawingContextMapControl : Control, ISharedMapControl
 
                 if (!_tileBitmapCache.TryGetValue(bitmapKey, out var bitmap))
                 {
-                    // Decode synchronously on UI thread, limited to MaxDecodesPerFrame per frame
-                    // to avoid blowing the frame budget. Remaining tiles show on next frame.
-                    if (decodesThisFrame >= MaxDecodesPerFrame)
+                    // Decode PNG on a background thread to avoid blocking the UI/render thread.
+                    // When decoding completes, the bitmap is added to the cache and
+                    // InvalidateVisual() triggers a redraw to show it.
+                    if (!_pendingTileDecodes.Contains(bitmapKey))
                     {
-                        continue; // defer to next frame
-                    }
-                    try
-                    {
-                        using var ms = new MemoryStream(tileBytes);
-                        bitmap = new Bitmap(ms);
-                        while (_tileBitmapEviction.Count >= TileBitmapCacheMax)
+                        _pendingTileDecodes.Add(bitmapKey);
+                        var capturedBytes = tileBytes;
+                        var capturedKey   = bitmapKey;
+                        Task.Run(() =>
                         {
-                            var old = _tileBitmapEviction.Dequeue();
-                            if (_tileBitmapCache.Remove(old, out var oldBmp))
-                                try { oldBmp.Dispose(); } catch { }
-                        }
-                        _tileBitmapCache[bitmapKey] = bitmap;
-                        _tileBitmapEviction.Enqueue(bitmapKey);
-                        decodesThisFrame++;
+                            Bitmap? bmp = null;
+                            try
+                            {
+                                using var ms = new MemoryStream(capturedBytes);
+                                bmp = new Bitmap(ms);
+                            }
+                            catch { /* decode failed, bmp stays null */ }
+                            Dispatcher.UIThread.Post(() =>
+                            {
+                                _pendingTileDecodes.Remove(capturedKey);
+                                if (bmp != null)
+                                {
+                                    while (_tileBitmapEviction.Count >= TileBitmapCacheMax)
+                                    {
+                                        var old = _tileBitmapEviction.Dequeue();
+                                        if (_tileBitmapCache.Remove(old, out var oldBmp))
+                                            try { oldBmp.Dispose(); } catch { }
+                                    }
+                                    _tileBitmapCache[capturedKey] = bmp;
+                                    _tileBitmapEviction.Enqueue(capturedKey);
+                                    InvalidateVisual();
+                                }
+                            }, DispatcherPriority.Background);
+                        });
                     }
-                    catch { continue; }
+                    continue; // tile not ready yet — will show after decode
                 }
 
                 try
@@ -1104,8 +1112,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         int radiusY = Math.Min((int)Math.Ceiling(viewHeight / tileMeters) + 2, 5);
         int n = 1 << zoom;
 
-        int decodesThisFrame = 0;
-
         for (int dtx = -radiusX; dtx <= radiusX; dtx++)
         {
             int tx = centerTX + dtx;
@@ -1125,22 +1131,39 @@ public class DrawingContextMapControl : Control, ISharedMapControl
 
                 if (!_egibBitmapCache.TryGetValue(bitmapKey, out var bitmap))
                 {
-                    if (decodesThisFrame >= MaxDecodesPerFrame) continue;
-                    try
+                    if (!_pendingEgibDecodes.Contains(bitmapKey))
                     {
-                        using var ms = new MemoryStream(tileBytes);
-                        bitmap = new Bitmap(ms);
-                        while (_egibBitmapEviction.Count >= EgibBitmapCacheMax)
+                        _pendingEgibDecodes.Add(bitmapKey);
+                        var capturedBytes = tileBytes;
+                        var capturedKey   = bitmapKey;
+                        Task.Run(() =>
                         {
-                            var old = _egibBitmapEviction.Dequeue();
-                            if (_egibBitmapCache.Remove(old, out var oldBmp))
-                                try { oldBmp.Dispose(); } catch { }
-                        }
-                        _egibBitmapCache[bitmapKey] = bitmap;
-                        _egibBitmapEviction.Enqueue(bitmapKey);
-                        decodesThisFrame++;
+                            Bitmap? bmp = null;
+                            try
+                            {
+                                using var ms = new MemoryStream(capturedBytes);
+                                bmp = new Bitmap(ms);
+                            }
+                            catch { /* decode failed */ }
+                            Dispatcher.UIThread.Post(() =>
+                            {
+                                _pendingEgibDecodes.Remove(capturedKey);
+                                if (bmp != null)
+                                {
+                                    while (_egibBitmapEviction.Count >= EgibBitmapCacheMax)
+                                    {
+                                        var old = _egibBitmapEviction.Dequeue();
+                                        if (_egibBitmapCache.Remove(old, out var oldBmp))
+                                            try { oldBmp.Dispose(); } catch { }
+                                    }
+                                    _egibBitmapCache[capturedKey] = bmp;
+                                    _egibBitmapEviction.Enqueue(capturedKey);
+                                    InvalidateVisual();
+                                }
+                            }, DispatcherPriority.Background);
+                        });
                     }
-                    catch { continue; }
+                    continue;
                 }
 
                 try
@@ -1196,25 +1219,12 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         if (_boundary == null)
         {
             if (_renderCounter % 60 == 0)
-                Console.WriteLine("[MapControl] DrawBoundary: _boundary is null!");
             return;
         }
 
         // Draw outer boundary
         if (_boundary.OuterBoundary != null && _boundary.OuterBoundary.IsValid && _boundary.OuterBoundary.Points.Count > 1)
         {
-            // Log occasionally to confirm we're drawing and show actual vertices
-            if (_renderCounter % 60 == 0)
-            {
-                Console.WriteLine($"[MapControl] DrawBoundary: Drawing outer boundary with {_boundary.OuterBoundary.Points.Count} points");
-                var pts = _boundary.OuterBoundary.Points;
-                if (pts.Count > 0)
-                {
-                    Console.WriteLine($"[MapControl]   First point: ({pts[0].Easting:F2}, {pts[0].Northing:F2})");
-                    if (pts.Count > 1)
-                        Console.WriteLine($"[MapControl]   Last point: ({pts[pts.Count-1].Easting:F2}, {pts[pts.Count-1].Northing:F2})");
-                }
-            }
             var geometry = new StreamGeometry();
             using (var ctx = geometry.Open())
             {
@@ -1229,13 +1239,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             }
             context.DrawGeometry(null, _boundaryPenOuter, geometry);
         }
-        else
-        {
-            // Log why we're not drawing
-            if (_renderCounter % 60 == 0)
-                Console.WriteLine($"[MapControl] DrawBoundary: NOT drawing outer! OuterBoundary={_boundary.OuterBoundary != null}, IsValid={_boundary.OuterBoundary?.IsValid}, Points={_boundary.OuterBoundary?.Points?.Count ?? 0}");
-        }
-
         // Draw inner boundaries (holes)
         foreach (var inner in _boundary.InnerBoundaries)
         {
@@ -1353,7 +1356,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
     {
         if (_bitmapWidth <= 0 || _bitmapHeight <= 0)
         {
-            Console.WriteLine($"[CreateCoverageBitmap] Invalid dimensions: {_bitmapWidth}x{_bitmapHeight}");
             return;
         }
 
@@ -1374,7 +1376,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             Avalonia.Platform.PixelFormat.Bgra8888);
 
         long memMB = (long)_bitmapWidth * _bitmapHeight * 6 / 1024 / 1024; // 2 + 4 bytes per pixel
-        Console.WriteLine($"[CreateCoverageBitmap] Created {_bitmapWidth}x{_bitmapHeight} Rgb565+Bgra8888 bitmaps (~{memMB}MB)");
 
         // Clear data bitmap to black (0x0000)
         using (var framebuffer = _coverageWriteableBitmap.Lock())
@@ -1397,13 +1398,11 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         // Composite background if available (uses its own lock)
         if (!string.IsNullOrEmpty(_backgroundImagePath) && File.Exists(_backgroundImagePath))
         {
-            Console.WriteLine($"[CreateCoverageBitmap] Compositing background from {_backgroundImagePath}");
             CompositeBackgroundIntoBitmap();
             _bitmapHasContent = true;
         }
         else
         {
-            Console.WriteLine($"[CreateCoverageBitmap] No background, initialized to black (transparent until coverage painted)");
             _backgroundComposited = false;
             _bitmapHasContent = false;
         }
@@ -1419,25 +1418,20 @@ public class DrawingContextMapControl : Control, ISharedMapControl
     /// </summary>
     private void UpdateCoverageBitmapIfNeeded()
     {
-        Console.WriteLine($"[UpdateCovBitmapIfNeeded] boundsProvider={_coverageBoundsProvider != null}, cellsProvider={_coverageAllCellsProvider != null}, needsRebuild={_bitmapNeedsFullRebuild}");
 
         if (_coverageBoundsProvider == null || _coverageAllCellsProvider == null)
         {
-            Console.WriteLine("[UpdateCovBitmapIfNeeded] No providers, returning early");
             return;
         }
 
         // Get coverage bounds
         var bounds = _coverageBoundsProvider();
-        Console.WriteLine($"[UpdateCovBitmapIfNeeded] bounds={bounds != null}, explicit={_bitmapExplicitlyInitialized}");
         if (bounds == null)
         {
             // No coverage data - but if bitmap was explicitly initialized (with background),
             // preserve it so the background stays visible
-            Console.WriteLine($"[UpdateCovBitmapIfNeeded] bounds=null, preserving bitmap (explicit={_bitmapExplicitlyInitialized})");
             if (_coverageWriteableBitmap != null && !_bitmapExplicitlyInitialized)
             {
-                Console.WriteLine("[Timing] CovBitmap: Clearing bitmap (no coverage)");
                 _coverageWriteableBitmap.Dispose();
                 _coverageWriteableBitmap = null;
                 _bitmapWidth = 0;
@@ -1520,7 +1514,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             var sw = System.Diagnostics.Stopwatch.StartNew();
             int cellCount = UpdateCoverageBitmapFull();
             sw.Stop();
-            Console.WriteLine($"[Timing] CovBitmap: Full rebuild {cellCount} cells in {sw.ElapsedMilliseconds}ms");
             _bitmapNeedsFullRebuild = false;
             _bitmapNeedsIncrementalUpdate = false;
             _thumbnailNeedsRebuild = true; // Rebuild thumbnail after full rebuild
@@ -1531,7 +1524,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             int cellCount = UpdateCoverageBitmapIncremental();
             if (cellCount > 0)
             {
-                Console.WriteLine($"[Timing] CovBitmap: Incremental {cellCount} cells");
                 _thumbnailNeedsRebuild = true; // Rebuild thumbnail after incremental update
             }
             _bitmapNeedsIncrementalUpdate = false;
@@ -1620,7 +1612,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         }
 
         sw.Stop();
-        Console.WriteLine($"[Timing] Thumbnail: Created {_thumbnailWidth}x{_thumbnailHeight} in {sw.ElapsedMilliseconds}ms");
     }
 
     /// <summary>
@@ -1646,7 +1637,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
 
         if (overlapMinE >= overlapMaxE || overlapMinN >= overlapMaxN)
         {
-            Debug.WriteLine("[Background] No overlap between background and coverage bounds");
             _backgroundComposited = false;
             return;
         }
@@ -1713,14 +1703,12 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[Background] Failed to decode background: {ex.Message}");
             _backgroundComposited = false;
             return;
         }
 
         if (bgPixelData == null)
         {
-            Debug.WriteLine("[Background] Failed to get background pixel data");
             _backgroundComposited = false;
             return;
         }
@@ -1812,7 +1800,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         }
 
         sw.Stop();
-        Debug.WriteLine($"[Background] Composited {pixelsWritten} pixels into coverage bitmap in {sw.ElapsedMilliseconds}ms");
         _backgroundComposited = true;
 
         // Sync display bitmap so background shows with proper transparency
@@ -1874,7 +1861,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         if (DateTime.Now.Second != _lastDestRectLogSecond)
         {
             _lastDestRectLogSecond = DateTime.Now.Second;
-            Console.WriteLine($"[DrawCovBitmap] destRect: ({_bitmapMinE:F2}, {_bitmapMinN:F2}) size ({worldWidth:F2}, {worldHeight:F2})");
         }
 
         // Use thumbnail when zoomed out to avoid expensive GPU downscaling
@@ -1898,7 +1884,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         {
             if (!string.IsNullOrEmpty(_backgroundImagePath) && File.Exists(_backgroundImagePath))
             {
-                Console.WriteLine($"[DrawCovBitmap] Compositing background from {_backgroundImagePath}");
                 CompositeBackgroundIntoBitmap();
             }
             else
@@ -1937,7 +1922,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
     /// </summary>
     private unsafe int UpdateCoverageBitmapFull()
     {
-        Console.WriteLine($"[UpdateCovBitmapFull] Called: control={GetHashCode()}, bitmap={_coverageWriteableBitmap != null}, provider={_coverageAllCellsProvider != null}, bgPath={_backgroundImagePath}");
 
         if (_coverageWriteableBitmap == null || _coverageAllCellsProvider == null)
             return 0;
@@ -1952,12 +1936,10 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         // Step 2: Composite background if available (uses its own lock)
         if (!string.IsNullOrEmpty(_backgroundImagePath) && File.Exists(_backgroundImagePath))
         {
-            Console.WriteLine($"[UpdateCovBitmapFull] Compositing background from {_backgroundImagePath}");
             CompositeBackgroundIntoBitmap();
         }
         else
         {
-            Console.WriteLine($"[UpdateCovBitmapFull] No background to composite");
         }
 
         // Step 3: Write coverage cells
@@ -2155,7 +2137,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         // Re-composite background if available (uses its own lock)
         if (!string.IsNullOrEmpty(_backgroundImagePath) && File.Exists(_backgroundImagePath))
         {
-            Console.WriteLine($"[ClearCoveragePixels] Re-compositing background from {_backgroundImagePath}");
             CompositeBackgroundIntoBitmap();
         }
 
@@ -2489,7 +2470,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             _lastRenderedVertexCounts.Clear();
             _firstNonFinalizedPatchIndex = 0;
 
-            Debug.WriteLine($"[DrawingContextMapControl] Created coverage bitmap: {bitmapWidth}x{bitmapHeight} for {worldWidth:F0}x{worldHeight:F0}m field");
         }
     }
 
@@ -2528,11 +2508,9 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             var uri = new Uri("avares://AgValoniaGPS.Views/Assets/Images/TractorAoG.png");
             using var stream = AssetLoader.Open(uri);
             _vehicleImage = new Bitmap(stream);
-            Debug.WriteLine("[DrawingContextMapControl] Loaded tractor image successfully");
         }
         catch (Exception ex)
         {
-            Debug.WriteLine($"[DrawingContextMapControl] Failed to load tractor image: {ex.Message}");
             // Fallback to triangle drawing if image fails to load
         }
     }
@@ -3891,16 +3869,13 @@ public class DrawingContextMapControl : Control, ISharedMapControl
     public void SetBoundary(Boundary? boundary)
     {
         var newOuterPoints = boundary?.OuterBoundary?.Points?.Count ?? 0;
-        Console.WriteLine($"[MapControl] SetBoundary called: boundary={boundary != null}, outerPoints={newOuterPoints}");
 
         // Log boundary vertices to verify they match what we expect
         if (boundary?.OuterBoundary?.Points != null && boundary.OuterBoundary.Points.Count > 0)
         {
             var pts = boundary.OuterBoundary.Points;
-            Console.WriteLine($"[MapControl] SetBoundary vertices:");
             for (int i = 0; i < pts.Count; i++)
             {
-                Console.WriteLine($"[MapControl]   Point {i}: E={pts[i].Easting:F2}, N={pts[i].Northing:F2}");
             }
         }
 
@@ -3921,8 +3896,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
 
     public void SetBackgroundImage(string imagePath, double minX, double maxY, double maxX, double minY)
     {
-        Console.WriteLine($"[MapControl] SetBackgroundImage: {imagePath}, control={GetHashCode()}");
-        Console.WriteLine($"[MapControl] Background bounds: minX={minX:F1}, maxY={maxY:F1}, maxX={maxX:F1}, minY={minY:F1}");
 
         _backgroundImagePath = imagePath;
         _bgMinX = minX;
@@ -3939,15 +3912,11 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             try
             {
                 _backgroundImage = new Bitmap(imagePath);
-                Console.WriteLine($"[MapControl] Loaded background image: {_backgroundImage.PixelSize.Width}x{_backgroundImage.PixelSize.Height}");
-                Debug.WriteLine($"[DrawingContextMapControl] Loaded background image: {imagePath} ({_backgroundImage.PixelSize.Width}x{_backgroundImage.PixelSize.Height})");
-                Debug.WriteLine($"  Bounds: minX={minX:F1}, maxY={maxY:F1}, maxX={maxX:F1}, minY={minY:F1}");
 
                 // If coverage bitmap already exists, composite the background into it immediately
                 // This handles the case where boundary is set before background (new field creation)
                 if (_coverageWriteableBitmap != null && _bitmapWidth > 0 && _bitmapHeight > 0)
                 {
-                    Console.WriteLine("[MapControl] Coverage bitmap exists, compositing background immediately");
                     CompositeBackgroundIntoBitmap();
                     _backgroundComposited = true;
                 }
@@ -3955,19 +3924,16 @@ public class DrawingContextMapControl : Control, ISharedMapControl
                 {
                     // No coverage bitmap yet - will composite when bitmap is created
                     _backgroundComposited = false;
-                    Console.WriteLine("[MapControl] No coverage bitmap yet, will composite when created");
                 }
                 InvalidateVisual();
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[DrawingContextMapControl] Failed to load background image: {ex.Message}");
                 _backgroundComposited = false;
             }
         }
         else
         {
-            Debug.WriteLine($"[DrawingContextMapControl] Background image path invalid or not found: {imagePath}");
             _backgroundComposited = false;
         }
     }
@@ -3992,7 +3958,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         _metersPerDegreeLon = 111412.84 * Math.Cos(originLatRad)
             - 93.5 * Math.Cos(3.0 * originLatRad) + 0.118 * Math.Cos(5.0 * originLatRad);
 
-        Console.WriteLine($"[MapControl] SetBackgroundImageWithMercator: Mercator bounds Y[{mercMinY:F1}, {mercMaxY:F1}]");
 
         // Call the regular method for the rest
         SetBackgroundImage(imagePath, minX, maxY, maxX, minY);
@@ -4000,7 +3965,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
 
     public void ClearBackground()
     {
-        Console.WriteLine($"[MapControl] ClearBackground() called - fully clearing background");
         _backgroundImage?.Dispose();
         _backgroundImage = null;
         _backgroundImagePath = null;
@@ -4126,7 +4090,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             foreach (var (_, (geom, _)) in _batchedCoverageByColor)
                 batchedCount += geom.Children.Count;
 
-            Debug.WriteLine($"[Timing] SetPatches: {_lastSetCoveragePatchesMs:F2}ms, CovDraw: {_lastCoverageRenderMs:F2}ms, Drawn: {_lastDrawnPatchCount}/{patches.Count}, Batched: {batchedCount}, Active: {_activePatchIndices.Count}");
         }
     }
 
@@ -4159,17 +4122,14 @@ public class DrawingContextMapControl : Control, ISharedMapControl
 
     public void MarkCoverageFullRebuildNeeded()
     {
-        Console.WriteLine($"[MapControl] MarkCoverageFullRebuildNeeded() called, pending={_bitmapUpdatePending}");
         _bitmapNeedsFullRebuild = true;
 
         // Schedule bitmap update
         if (!_bitmapUpdatePending)
         {
-            Console.WriteLine("[MapControl] Scheduling UpdateCoverageBitmapIfNeeded via Dispatcher");
             _bitmapUpdatePending = true;
             Dispatcher.UIThread.Post(() =>
             {
-                Console.WriteLine("[MapControl] Running UpdateCoverageBitmapIfNeeded() from full rebuild request");
                 UpdateCoverageBitmapIfNeeded();
                 _bitmapUpdatePending = false;
             }, DispatcherPriority.Background);
@@ -4183,7 +4143,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
     /// </summary>
     public void InitializeCoverageBitmapWithBounds(double minE, double maxE, double minN, double maxN)
     {
-        Console.WriteLine($"[MapControl] InitializeCoverageBitmapWithBounds: E[{minE:F1}, {maxE:F1}] N[{minN:F1}, {maxN:F1}], control={GetHashCode()}");
 
         double worldWidth = maxE - minE;
         double worldHeight = maxN - minN;
@@ -4223,7 +4182,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         // Ensure valid dimensions
         if (requiredWidth <= 0 || requiredHeight <= 0)
         {
-            Console.WriteLine($"[MapControl] Invalid bitmap dimensions: {requiredWidth}x{requiredHeight}");
             return;
         }
 
@@ -4236,7 +4194,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
             _bitmapWidth == requiredWidth &&
             _bitmapHeight == requiredHeight)
         {
-            Console.WriteLine($"[MapControl] Bitmap already initialized with same bounds, skipping");
             return;
         }
 
@@ -4258,7 +4215,6 @@ public class DrawingContextMapControl : Control, ISharedMapControl
         // Mark bitmap as ready
         _bitmapNeedsFullRebuild = false;
         _bitmapNeedsIncrementalUpdate = false;
-        Console.WriteLine($"[MapControl] Bitmap initialized: {requiredWidth}x{requiredHeight} @ {cellSize}m");
     }
 
     private void RebuildCoverageGeometryCache()

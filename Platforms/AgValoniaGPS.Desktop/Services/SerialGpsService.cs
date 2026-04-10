@@ -16,8 +16,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.IO.Ports;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using AgValoniaGPS.Services.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -27,12 +29,17 @@ namespace AgValoniaGPS.Desktop.Services;
 /// <summary>
 /// Serial port GPS service for Desktop (Windows, macOS, Linux).
 /// Reads NMEA sentences from a serial/COM port (USB u-blox, ArduSimple, etc.).
+///
+/// Uses a manual ReadLineAsync loop instead of SerialPort.DataReceived to avoid
+/// a known .NET race condition bug (NullReferenceException in
+/// SerialStream.EventLoopRunner.CallReceiveEvents at high baud rates).
 /// </summary>
 public class SerialGpsService : ISerialGpsService, IDisposable
 {
     private readonly ILogger<SerialGpsService> _logger;
     private SerialPort? _port;
-    private readonly StringBuilder _lineBuffer = new();
+    private CancellationTokenSource? _readCts;
+    private Task? _readTask;
 
     public bool IsConnected { get; private set; }
     public string? ConnectedPortName { get; private set; }
@@ -60,25 +67,28 @@ public class SerialGpsService : ISerialGpsService, IDisposable
 
     public Task<bool> ConnectAsync(string portName, int baudRate)
     {
-        DisconnectInternal();
+        StopReadLoop();
+        ClosePort();
 
         try
         {
             _port = new SerialPort(portName, baudRate)
             {
-                ReadTimeout = 2000,
+                ReadTimeout  = SerialPort.InfiniteTimeout,
                 WriteTimeout = 500,
-                Encoding = Encoding.ASCII,
-                NewLine = "\n"
+                Encoding     = Encoding.ASCII,
+                NewLine      = "\n"
             };
-            _port.DataReceived += OnDataReceived;
-            _port.ErrorReceived += OnErrorReceived;
             _port.Open();
 
-            IsConnected = true;
+            IsConnected     = true;
             ConnectedPortName = portName;
             ConnectionStateChanged?.Invoke(this, true);
             _logger.LogInformation("Serial GPS connected on {Port} at {Baud} baud", portName, baudRate);
+
+            _readCts  = new CancellationTokenSource();
+            _readTask = Task.Run(() => ReadLoop(_readCts.Token));
+
             return Task.FromResult(true);
         }
         catch (Exception ex)
@@ -90,10 +100,10 @@ public class SerialGpsService : ISerialGpsService, IDisposable
         }
     }
 
-    public Task DisconnectAsync()
+    public async Task DisconnectAsync()
     {
-        DisconnectInternal();
-        return Task.CompletedTask;
+        await StopReadLoopAsync();
+        ClosePort();
     }
 
     public Task WriteAsync(byte[] data)
@@ -112,12 +122,83 @@ public class SerialGpsService : ISerialGpsService, IDisposable
         return Task.CompletedTask;
     }
 
-    private void DisconnectInternal()
+    // ── private helpers ──────────────────────────────────────────────────────
+
+    private async Task ReadLoop(CancellationToken ct)
+    {
+        var port = _port;
+        if (port == null) return;
+
+        // StreamReader wraps the BaseStream; leaveOpen=true so we control port lifetime.
+        using var reader = new StreamReader(port.BaseStream, Encoding.ASCII,
+            detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true);
+
+        var sb = new StringBuilder();
+        var buf = new char[256];
+
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                int read = await reader.ReadAsync(buf, ct);
+                if (read == 0) break; // EOF / port closed
+
+                for (int i = 0; i < read; i++)
+                {
+                    char c = buf[i];
+                    if (c == '\n')
+                    {
+                        // Strip trailing CR if present
+                        if (sb.Length > 0 && sb[sb.Length - 1] == '\r')
+                            sb.Length--;
+
+                        var line = sb.ToString();
+                        sb.Clear();
+
+                        if (!string.IsNullOrWhiteSpace(line))
+                            NmeaLineReceived?.Invoke(this, line);
+                    }
+                    else
+                    {
+                        sb.Append(c);
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* normal shutdown */ }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Serial read error on {Port}", ConnectedPortName);
+            // Port unexpectedly disconnected — notify on background thread is fine
+            ClosePort();
+        }
+    }
+
+    private void StopReadLoop()
+    {
+        _readCts?.Cancel();
+        _readCts?.Dispose();
+        _readCts = null;
+        _readTask = null;
+    }
+
+    private async Task StopReadLoopAsync()
+    {
+        if (_readCts == null) return;
+        _readCts.Cancel();
+        if (_readTask != null)
+        {
+            try { await _readTask.ConfigureAwait(false); }
+            catch { /* expected cancellation/IO exceptions */ }
+        }
+        _readCts.Dispose();
+        _readCts  = null;
+        _readTask = null;
+    }
+
+    private void ClosePort()
     {
         if (_port == null) return;
-
-        _port.DataReceived -= OnDataReceived;
-        _port.ErrorReceived -= OnErrorReceived;
 
         try { if (_port.IsOpen) _port.Close(); } catch { }
         _port.Dispose();
@@ -125,50 +206,16 @@ public class SerialGpsService : ISerialGpsService, IDisposable
 
         if (IsConnected)
         {
-            IsConnected = false;
+            IsConnected       = false;
             ConnectedPortName = null;
             ConnectionStateChanged?.Invoke(this, false);
             _logger.LogInformation("Serial GPS disconnected");
         }
     }
 
-    private void OnDataReceived(object sender, SerialDataReceivedEventArgs e)
-    {
-        // Capture local reference to avoid race with DisconnectInternal setting _port = null
-        var port = _port;
-        if (port == null || !port.IsOpen) return;
-
-        try
-        {
-            var text = port.ReadExisting();
-            _lineBuffer.Append(text);
-
-            var buf = _lineBuffer.ToString();
-            int newlineIdx;
-            while ((newlineIdx = buf.IndexOf('\n')) >= 0)
-            {
-                var line = buf.Substring(0, newlineIdx).TrimEnd('\r');
-                buf = buf.Substring(newlineIdx + 1);
-                if (!string.IsNullOrWhiteSpace(line))
-                    NmeaLineReceived?.Invoke(this, line);
-            }
-            _lineBuffer.Clear();
-            _lineBuffer.Append(buf);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error reading from serial port");
-        }
-    }
-
-    private void OnErrorReceived(object sender, SerialErrorReceivedEventArgs e)
-    {
-        _logger.LogWarning("Serial port error: {Error}", e.EventType);
-        DisconnectInternal();
-    }
-
     public void Dispose()
     {
-        DisconnectInternal();
+        StopReadLoop();
+        ClosePort();
     }
 }

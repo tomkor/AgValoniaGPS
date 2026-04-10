@@ -159,6 +159,12 @@ public partial class MainViewModel
             _previousFixQuality = data.FixQuality;
         }
 
+        // Status-only update (no position fix): skip map/navigation updates
+        // to avoid moving the vehicle marker to (0,0).
+        if (Math.Abs(data.CurrentPosition.Latitude) < 1e-9 &&
+            Math.Abs(data.CurrentPosition.Longitude) < 1e-9)
+            return;
+
         // Convert WGS84 to local coordinates for display
         // In simulator mode, this is already done. In real GPS mode, GpsData only has lat/lon.
         double posEasting = data.CurrentPosition.Easting;
