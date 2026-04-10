@@ -42,4 +42,7 @@ public class BluetoothGpsService : IGpsBluetoothService
 
     public Task DisconnectAsync()
         => Task.CompletedTask;
+
+    public Task<bool> WriteRtcmAsync(byte[] data, CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
 }

@@ -15,6 +15,7 @@
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 using System;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using AgValoniaGPS.Services;
@@ -34,7 +35,6 @@ using AgValoniaGPS.ViewModels;
 using AgValoniaGPS.Models;
 using AgValoniaGPS.Models.State;
 using AgValoniaGPS.Desktop.Services;
-using AgValoniaGPS.Services.Interfaces;
 
 namespace AgValoniaGPS.Desktop.DependencyInjection;
 
@@ -138,8 +138,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<MapService>();
         services.AddSingleton<IMapService>(sp => sp.GetRequiredService<MapService>());
 
-        // BLE GPS service (Nordic UART Service for ArduSimple and similar devices)
-        services.AddSingleton<IGpsBluetoothService, BluetoothGpsService>();
+        // BLE GPS service — platform-specific:
+        //   macOS: CoreBluetooth via ObjC runtime (InTheHand uses Linux D-Bus on macOS)
+        //   Windows/Linux: InTheHand.BluetoothLE (WinRT / BlueZ)
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            services.AddSingleton<IGpsBluetoothService, MacOsBluetoothGpsService>();
+        else
+            services.AddSingleton<IGpsBluetoothService, BluetoothGpsService>();
 
         // Serial GPS service (USB COM port for u-blox, ArduSimple, etc.)
         services.AddSingleton<ISerialGpsService, SerialGpsService>();

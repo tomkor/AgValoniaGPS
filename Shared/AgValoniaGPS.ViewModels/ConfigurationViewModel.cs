@@ -1540,8 +1540,16 @@ public partial class ConfigurationViewModel : ReactiveObject
                     _bluetoothDevices.Add(d);
                 if (_bluetoothDevices.Count == 0)
                 {
-                    BleScanStatus = "No devices found. On macOS: check System Settings → Privacy & Security → Bluetooth — the app must be allowed. If the entry is missing, try running the app once from the terminal.";
-                    _bluetoothDevices.Add("(No devices found)");
+                    if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                            System.Runtime.InteropServices.OSPlatform.OSX))
+                    {
+                        BleScanStatus = "No devices found. On macOS, verify Bluetooth is enabled and " +
+                            "AgValoniaGPS is allowed in System Settings > Privacy & Security > Bluetooth.";
+                    }
+                    else
+                    {
+                        BleScanStatus = "No devices found. Make sure the device is powered on and in range.";
+                    }
                 }
                 else
                 {
@@ -1551,7 +1559,6 @@ public partial class ConfigurationViewModel : ReactiveObject
             catch (Exception ex)
             {
                 BleScanStatus = $"Scan error: {ex.Message}";
-                _bluetoothDevices.Add("(No devices found)");
             }
             finally
             {

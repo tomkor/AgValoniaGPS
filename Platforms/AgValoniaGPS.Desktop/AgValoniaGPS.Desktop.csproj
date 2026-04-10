@@ -31,8 +31,9 @@
     <None Include="Assets\Images\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <!-- macOS: copy Info.plist next to the executable so CoreBluetooth permission dialog appears -->
-  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+  <!-- macOS: copy Info.plist next to the executable so CoreBluetooth permission dialog appears.
+       Include it also for cross-publish when RuntimeIdentifier is osx-* (e.g. CI building macOS artifacts). -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) Or $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('osx-'))">
     <Content Include="Info.plist">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

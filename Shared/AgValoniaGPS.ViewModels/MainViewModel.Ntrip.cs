@@ -200,9 +200,11 @@ public partial class MainViewModel
 
     private void OnRtcmDataReceived(object? sender, RtcmDataReceivedEventArgs e)
     {
-        // Forward RTCM bytes directly to serial GPS receiver if connected
+        // Forward RTCM bytes to connected GNSS links.
         if (_serialGpsService != null && _serialGpsService.IsConnected && e.Data.Length > 0)
             _ = _serialGpsService.WriteAsync(e.Data);
+        if (_bluetoothGpsService != null && _bluetoothGpsService.IsConnected && e.Data.Length > 0)
+            _ = _bluetoothGpsService.WriteRtcmAsync(e.Data);
 
         // Marshal to UI thread (use Invoke for synchronous execution to avoid modal dialog issues)
         if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())

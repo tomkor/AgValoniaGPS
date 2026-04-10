@@ -56,4 +56,10 @@ public interface IGpsBluetoothService
 
     /// <summary>Disconnect from the current BLE device.</summary>
     Task DisconnectAsync();
+
+    /// <summary>
+    /// Write RTCM correction bytes to the BLE GPS receiver (typically NUS RX characteristic).
+    /// Returns true if the data was accepted for sending.
+    /// </summary>
+    Task<bool> WriteRtcmAsync(byte[] data, CancellationToken cancellationToken = default);
 }

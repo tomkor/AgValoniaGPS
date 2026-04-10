@@ -24,6 +24,11 @@ using InTheHand.Bluetooth;
 using AgValoniaGPS.Services.Interfaces;
 using Microsoft.Extensions.Logging;
 
+// InTheHand.BluetoothLE uses Tmds.DBus (Linux/BlueZ) as its non-Windows backend.
+// On macOS it tries D-Bus instead of CoreBluetooth and immediately throws a
+// ConnectException. The BLE service therefore short-circuits on macOS and returns
+// an informative message so the user can fall back to the USB serial connection.
+
 namespace AgValoniaGPS.Desktop.Services;
 
 /// <summary>
@@ -34,7 +39,7 @@ namespace AgValoniaGPS.Desktop.Services;
 /// Nordic UART Service UUIDs:
 ///   Service:        6E400001-B5A3-F393-E0A9-E50E24DCCA9E
 ///   TX (notify):    6E400003-B5A3-F393-E0A9-E50E24DCCA9E  (device → app)
-///   RX (write):     6E400002-B5A3-F393-E0A9-E50E24DCCA9E  (app → device, not used)
+///   RX (write):     6E400002-B5A3-F393-E0A9-E50E24DCCA9E  (app → device, RTCM corrections)
 /// </summary>
 public class BluetoothGpsService : IGpsBluetoothService, IDisposable
 {
@@ -42,12 +47,18 @@ public class BluetoothGpsService : IGpsBluetoothService, IDisposable
         BluetoothUuid.FromGuid(new Guid("6E400001-B5A3-F393-E0A9-E50E24DCCA9E"));
     private static readonly BluetoothUuid NusTxCharUuid =
         BluetoothUuid.FromGuid(new Guid("6E400003-B5A3-F393-E0A9-E50E24DCCA9E"));
+    private static readonly BluetoothUuid NusRxCharUuid =
+        BluetoothUuid.FromGuid(new Guid("6E400002-B5A3-F393-E0A9-E50E24DCCA9E"));
 
     private readonly ILogger<BluetoothGpsService> _logger;
 
     private BluetoothDevice? _connectedDevice;
     private GattCharacteristic? _txCharacteristic;
+    private GattCharacteristic? _rxCharacteristic;
     private readonly StringBuilder _lineBuffer = new();
+    private readonly SemaphoreSlim _rtcmWriteLock = new(1, 1);
+    private ulong _rtcmBytesSent;
+    private DateTime _lastRtcmProgressLogUtc = DateTime.MinValue;
 
     // Discovered devices from last scan: name → device
     private readonly Dictionary<string, BluetoothDevice> _scannedDevices = new();
@@ -72,6 +83,15 @@ public class BluetoothGpsService : IGpsBluetoothService, IDisposable
     public async Task<IList<string>> ScanForDevicesAsync(CancellationToken cancellationToken = default)
     {
         if (IsScanning) return Array.Empty<string>();
+
+        // InTheHand.BluetoothLE on macOS routes through Tmds.DBus (Linux BlueZ)
+        // instead of CoreBluetooth and immediately throws ConnectException.
+        // Return a clear error so the user knows to use USB serial instead.
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            _logger.LogWarning("BLE scanning is not supported on macOS with this build. Use USB serial connection instead.");
+            return Array.Empty<string>();
+        }
 
         IsScanning = true;
         _scannedDevices.Clear();
@@ -216,11 +236,16 @@ public class BluetoothGpsService : IGpsBluetoothService, IDisposable
                 return false;
             }
 
+            var rxChar = await service.GetCharacteristicAsync(NusRxCharUuid).ConfigureAwait(false);
+            if (rxChar == null)
+                _logger.LogWarning("BLE: NUS RX characteristic not found on {Name} (RTCM over BLE unavailable)", deviceName);
+
             txChar.CharacteristicValueChanged += OnCharacteristicValueChanged;
             await txChar.StartNotificationsAsync().ConfigureAwait(false);
 
             _connectedDevice = device;
             _txCharacteristic = txChar;
+            _rxCharacteristic = rxChar;
             IsConnected = true;
             ConnectedDeviceName = deviceName;
 
@@ -246,6 +271,7 @@ public class BluetoothGpsService : IGpsBluetoothService, IDisposable
             try { await _txCharacteristic.StopNotificationsAsync().ConfigureAwait(false); } catch { }
             _txCharacteristic = null;
         }
+        _rxCharacteristic = null;
 
         if (_connectedDevice != null)
         {
@@ -267,15 +293,78 @@ public class BluetoothGpsService : IGpsBluetoothService, IDisposable
     {
         _logger.LogWarning("BLE device disconnected unexpectedly");
         _txCharacteristic = null;
+        _rxCharacteristic = null;
         _connectedDevice = null;
         IsConnected = false;
         ConnectedDeviceName = null;
         ConnectionStateChanged?.Invoke(this, false);
     }
 
+    public async Task<bool> WriteRtcmAsync(byte[] data, CancellationToken cancellationToken = default)
+    {
+        if (!IsConnected || _rxCharacteristic == null || data.Length == 0)
+            return false;
+
+        var lockTaken = false;
+        try
+        {
+            await _rtcmWriteLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            lockTaken = true;
+
+            var canWriteWithoutResponse =
+                (_rxCharacteristic.Properties & GattCharacteristicProperties.WriteWithoutResponse) != 0;
+            var canWriteWithResponse =
+                (_rxCharacteristic.Properties & GattCharacteristicProperties.Write) != 0;
+
+            if (!canWriteWithoutResponse && !canWriteWithResponse)
+                return false;
+
+            // Keep chunks conservative across BLE stacks/modules.
+            var maxChunk = canWriteWithoutResponse ? 180 : 20;
+            var offset = 0;
+            while (offset < data.Length)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var len = Math.Min(maxChunk, data.Length - offset);
+                var chunk = new byte[len];
+                Buffer.BlockCopy(data, offset, chunk, 0, len);
+
+                if (canWriteWithoutResponse)
+                    await _rxCharacteristic.WriteValueWithoutResponseAsync(chunk).ConfigureAwait(false);
+                else
+                    await _rxCharacteristic.WriteValueWithResponseAsync(chunk).ConfigureAwait(false);
+                offset += len;
+            }
+
+            _rtcmBytesSent += (ulong)data.Length;
+            var now = DateTime.UtcNow;
+            if ((now - _lastRtcmProgressLogUtc).TotalSeconds >= 3)
+            {
+                _lastRtcmProgressLogUtc = now;
+                _logger.LogInformation("BLE RTCM forwarded: {Kb} KB", _rtcmBytesSent / 1024);
+            }
+
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "BLE RTCM write failed");
+            return false;
+        }
+        finally
+        {
+            if (lockTaken)
+                _rtcmWriteLock.Release();
+        }
+    }
+
     private void OnCharacteristicValueChanged(object? sender, GattCharacteristicValueChangedEventArgs e)
     {
-        var text = Encoding.ASCII.GetString(e.Value);
+        var text = Encoding.ASCII.GetString(e.Value ?? Array.Empty<byte>());
         _lineBuffer.Append(text);
 
         // Extract complete NMEA lines (delimited by \n or \r\n)
@@ -295,5 +384,6 @@ public class BluetoothGpsService : IGpsBluetoothService, IDisposable
     public void Dispose()
     {
         DisconnectAsync().GetAwaiter().GetResult();
+        _rtcmWriteLock.Dispose();
     }
 }
