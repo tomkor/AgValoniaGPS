@@ -46,6 +46,7 @@ public class NmeaParserService
     private double _ggaLon;
     private byte _ggaFix;
     private int _ggaSats;
+    private int _gsvSatsInView;
     private double _ggaHdop = 99.0;
     private float _ggaAlt;
     private bool _hasGgaData;
@@ -115,6 +116,10 @@ public class NmeaParserService
         {
             ParseRMC(words);
         }
+        else if (words[0].Length == 6 && words[0][0] == '$' && words[0].EndsWith("GSV", StringComparison.Ordinal) && words.Length >= 4)
+        {
+            ParseGSV(words);
+        }
     }
 
     private void ParsePANDA(string[] words)
@@ -165,6 +170,7 @@ public class NmeaParserService
             if (int.TryParse(words[7], NumberStyles.Float, CultureInfo.InvariantCulture, out int satellites))
             {
                 gpsData.SatellitesInUse = satellites;
+                gpsData.SatellitesInView = satellites;
             }
 
             // HDOP
@@ -303,6 +309,7 @@ public class NmeaParserService
                 {
                     FixQuality      = _ggaFix,
                     SatellitesInUse = _ggaSats,
+                    SatellitesInView = _gsvSatsInView > 0 ? _gsvSatsInView : _ggaSats,
                     Hdop            = _ggaHdop,
                     IsValid         = false
                 });
@@ -345,6 +352,7 @@ public class NmeaParserService
             {
                 FixQuality = _ggaFix,
                 SatellitesInUse = _ggaSats,
+                SatellitesInView = _gsvSatsInView > 0 ? _gsvSatsInView : _ggaSats,
                 Hdop = _ggaHdop,
                 Timestamp = DateTime.Now
             };
@@ -379,6 +387,22 @@ public class NmeaParserService
             ConsecutiveBadFixes = 0;
             gpsData.IsValid = true;
             _gpsService.UpdateGpsData(gpsData);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Parse standard NMEA $GxGSV sentence.
+    /// Extracts total satellites in view (field 3).
+    /// </summary>
+    private void ParseGSV(string[] words)
+    {
+        try
+        {
+            if (int.TryParse(words[3], NumberStyles.Float, CultureInfo.InvariantCulture, out int satsInView) && satsInView >= 0)
+            {
+                _gsvSatsInView = satsInView;
+            }
         }
         catch { }
     }

@@ -36,6 +36,11 @@ public class GpsData
     public int SatellitesInUse { get; set; }
 
     /// <summary>
+    /// Number of satellites in view (from GSV). May be 0 if not provided by receiver.
+    /// </summary>
+    public int SatellitesInView { get; set; }
+
+    /// <summary>
     /// Horizontal dilution of precision
     /// </summary>
     public double Hdop { get; set; }

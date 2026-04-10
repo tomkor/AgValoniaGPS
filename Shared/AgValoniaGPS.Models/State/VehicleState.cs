@@ -112,6 +112,13 @@ public class VehicleState : ReactiveObject
         }
     }
 
+    private int _satellitesInView;
+    public int SatellitesInView
+    {
+        get => _satellitesInView;
+        set => this.RaiseAndSetIfChanged(ref _satellitesInView, value);
+    }
+
     private double _hdop;
     public double Hdop
     {
@@ -177,6 +184,7 @@ public class VehicleState : ReactiveObject
         Latitude = Longitude = Altitude = 0;
         Easting = Northing = Heading = Speed = 0;
         FixQuality = SatelliteCount = 0;
+        SatellitesInView = 0;
         Hdop = Age = 0;
         ImuRoll = ImuPitch = ImuYawRate = 0;
     }

@@ -993,6 +993,9 @@
   <data xml:space="preserve" name="Satellites">
     <value>Satellites:</value>
   </data>
+  <data xml:space="preserve" name="SatellitesInView">
+    <value>Satellites in view:</value>
+  </data>
   <data xml:space="preserve" name="SaveProfile">
     <value>Save Profile</value>
   </data>

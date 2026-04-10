@@ -170,7 +170,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
                             <StackPanel Spacing="8">
                                 <TextBlock Classes="Header" Text="{loc:Localize GpsData}"/>
 
-                                <Grid ColumnDefinitions="140,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                                <Grid ColumnDefinitions="140,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                                     <TextBlock Classes="Label" Text="{loc:Localize Status}"/>
                                     <TextBlock Grid.Column="1" Text="{Binding StatusMessage}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}"/>
 
@@ -180,20 +180,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
                                     <TextBlock Grid.Row="2" Classes="Label" Text="{loc:Localize Satellites}" Margin="0,6,0,0"/>
                                     <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding State.Vehicle.SatelliteCount}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
 
-                                    <TextBlock Grid.Row="3" Classes="Label" Text="{loc:Localize Latitude2}" Margin="0,6,0,0"/>
-                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding State.Vehicle.Latitude, StringFormat='{}{0:F6}°'}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
+                                    <TextBlock Grid.Row="3" Classes="Label" Text="{loc:Localize SatellitesInView}" Margin="0,6,0,0"/>
+                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding State.Vehicle.SatellitesInView}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
 
-                                    <TextBlock Grid.Row="4" Classes="Label" Text="{loc:Localize Longitude2}" Margin="0,6,0,0"/>
-                                    <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding State.Vehicle.Longitude, StringFormat='{}{0:F6}°'}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
+                                    <TextBlock Grid.Row="4" Classes="Label" Text="{loc:Localize Latitude2}" Margin="0,6,0,0"/>
+                                    <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding State.Vehicle.Latitude, StringFormat='{}{0:F6}°'}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
 
-                                    <TextBlock Grid.Row="5" Classes="Label" Text="{loc:Localize Speed2}" Margin="0,6,0,0"/>
-                                    <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding State.Vehicle.Speed, StringFormat='{}{0:F2} m/s'}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
+                                    <TextBlock Grid.Row="5" Classes="Label" Text="{loc:Localize Longitude2}" Margin="0,6,0,0"/>
+                                    <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding State.Vehicle.Longitude, StringFormat='{}{0:F6}°'}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
 
-                                    <TextBlock Grid.Row="6" Classes="Label" Text="NTRIP Status" Margin="0,6,0,0"/>
-                                    <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding NtripStatus}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
+                                    <TextBlock Grid.Row="6" Classes="Label" Text="{loc:Localize Speed2}" Margin="0,6,0,0"/>
+                                    <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding State.Vehicle.Speed, StringFormat='{}{0:F2} m/s'}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
 
-                                    <TextBlock Grid.Row="7" Classes="Label" Text="NTRIP Bytes" Margin="0,6,0,0"/>
-                                    <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding NtripBytesReceived}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
+                                    <TextBlock Grid.Row="7" Classes="Label" Text="NTRIP Status" Margin="0,6,0,0"/>
+                                    <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding NtripStatus}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
+
+                                    <TextBlock Grid.Row="8" Classes="Label" Text="NTRIP Bytes" Margin="0,6,0,0"/>
+                                    <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding NtripBytesReceived}" Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" Margin="0,6,0,0"/>
                                 </Grid>
                             </StackPanel>
                         </Border>

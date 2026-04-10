@@ -219,6 +219,26 @@ public class NmeaParserServiceTests
 
     #endregion
 
+    #region GSV Satellites In View
+
+    [Test]
+    public void ParseSentence_GsvThenGgaRmc_PopulatesSatellitesInView()
+    {
+        string gsv = RecalculateChecksum("$GNGSV,3,1,24,01,40,083,42,02,17,308,43,03,08,120,35,04,12,250,38");
+        string gga = RecalculateChecksum("$GNGGA,123519,4807.038,N,01131.000,E,4,12,0.9,545.4,M,46.9,M,,");
+        string rmc = RecalculateChecksum("$GNRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
+
+        _parser.ParseSentence(gsv);
+        _parser.ParseSentence(gga);
+        _parser.ParseSentence(rmc);
+
+        Assert.That(_lastGpsData, Is.Not.Null);
+        Assert.That(_lastGpsData!.SatellitesInUse, Is.EqualTo(12));
+        Assert.That(_lastGpsData!.SatellitesInView, Is.EqualTo(24));
+    }
+
+    #endregion
+
     #region Sentence Too Short
 
     [Test]

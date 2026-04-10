@@ -33,6 +33,7 @@ public partial class MainViewModel
     private double _longitude;
     private double _speed;
     private int _satelliteCount;
+    private int _satelliteCountInView;
     private string _fixQuality = "No Fix";
     private int _previousFixQuality;
 
@@ -78,6 +79,12 @@ public partial class MainViewModel
     {
         get => _satelliteCount;
         set => this.RaiseAndSetIfChanged(ref _satelliteCount, value);
+    }
+
+    public int SatelliteCountInView
+    {
+        get => _satelliteCountInView;
+        set => this.RaiseAndSetIfChanged(ref _satelliteCountInView, value);
     }
 
     public string FixQuality
@@ -138,12 +145,14 @@ public partial class MainViewModel
             data.SatellitesInUse,
             data.Hdop,
             data.DifferentialAge);
+        State.Vehicle.SatellitesInView = data.SatellitesInView > 0 ? data.SatellitesInView : data.SatellitesInUse;
 
         // Legacy property updates (for existing bindings - will be removed in Phase 5)
         Latitude = data.CurrentPosition.Latitude;
         Longitude = data.CurrentPosition.Longitude;
         Speed = data.CurrentPosition.Speed;
         SatelliteCount = data.SatellitesInUse;
+        SatelliteCountInView = data.SatellitesInView > 0 ? data.SatellitesInView : data.SatellitesInUse;
         FixQuality = GetFixQualityString(data.FixQuality);
         StatusMessage = data.IsValid ? "GPS Active" : "Waiting for GPS";
 
