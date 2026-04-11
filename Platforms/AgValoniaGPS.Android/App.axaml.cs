@@ -85,50 +85,60 @@ public partial class App : Avalonia.Application
             catch { /* fall back to English */ }
         }
 
-        if (ApplicationLifetime is ISingleViewApplicationLifetime singleViewLifetime)
+        if (ApplicationLifetime is IActivityApplicationLifetime activityLifetime)
         {
-            Console.WriteLine("[App] Creating MainView...");
-
-            try
-            {
-                Console.WriteLine("[App] Getting MainViewModel...");
-                var viewModel = _serviceProvider.GetRequiredService<MainViewModel>();
-                Console.WriteLine("[App] Getting MapService...");
-                var mapService = (MapService)_serviceProvider.GetRequiredService<IMapService>();
-                Console.WriteLine("[App] Getting CoverageMapService...");
-                var coverageService = _serviceProvider.GetRequiredService<ICoverageMapService>();
-                Console.WriteLine("[App] All services retrieved, creating MainView...");
-
-                var mainView = new MainView(viewModel, mapService, coverageService);
-                singleViewLifetime.MainView = mainView;
-                MainView = mainView;
-                Console.WriteLine("[App] MainView created and assigned.");
-
-                // Wire language change to TranslationSource (#40)
-                viewModel.LanguageChanged += code =>
-                {
-                    try
-                    {
-                        AgValoniaGPS.Views.Localization.TranslationSource.Instance.CurrentCulture =
-                            new System.Globalization.CultureInfo(code);
-                    }
-                    catch { }
-                };
-
-                // Provide DI to chart panels for auto-configuration
-                AgValoniaGPS.Views.Controls.Panels.SteerChartPanel.ServiceProvider = Services;
-                AgValoniaGPS.Views.Controls.Panels.HeadingChartPanel.ServiceProvider = Services;
-                AgValoniaGPS.Views.Controls.Panels.XTEChartPanel.ServiceProvider = Services;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[App] Error creating MainView: {ex}");
-                throw;
-            }
+            activityLifetime.MainViewFactory = CreateMainView;
+        }
+        else if (ApplicationLifetime is ISingleViewApplicationLifetime singleViewLifetime)
+        {
+            singleViewLifetime.MainView = CreateMainView();
         }
 
         base.OnFrameworkInitializationCompleted();
         Console.WriteLine("[App] Framework initialization completed.");
+    }
+
+    private MainView CreateMainView()
+    {
+        Console.WriteLine("[App] Creating MainView...");
+
+        try
+        {
+            Console.WriteLine("[App] Getting MainViewModel...");
+            var viewModel = _serviceProvider!.GetRequiredService<MainViewModel>();
+            Console.WriteLine("[App] Getting MapService...");
+            var mapService = (MapService)_serviceProvider.GetRequiredService<IMapService>();
+            Console.WriteLine("[App] Getting CoverageMapService...");
+            var coverageService = _serviceProvider.GetRequiredService<ICoverageMapService>();
+            Console.WriteLine("[App] All services retrieved, creating MainView...");
+
+            var mainView = new MainView(viewModel, mapService, coverageService);
+            MainView = mainView;
+            Console.WriteLine("[App] MainView created and assigned.");
+
+            // Wire language change to TranslationSource (#40)
+            viewModel.LanguageChanged += code =>
+            {
+                try
+                {
+                    AgValoniaGPS.Views.Localization.TranslationSource.Instance.CurrentCulture =
+                        new System.Globalization.CultureInfo(code);
+                }
+                catch { }
+            };
+
+            // Provide DI to chart panels for auto-configuration
+            AgValoniaGPS.Views.Controls.Panels.SteerChartPanel.ServiceProvider = Services;
+            AgValoniaGPS.Views.Controls.Panels.HeadingChartPanel.ServiceProvider = Services;
+            AgValoniaGPS.Views.Controls.Panels.XTEChartPanel.ServiceProvider = Services;
+
+            return mainView;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[App] Error creating MainView: {ex}");
+            throw;
+        }
     }
 
     private static void ExtractSoundFiles(IServiceProvider services)

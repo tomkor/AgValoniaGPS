@@ -122,7 +122,7 @@ public partial class EditableNumericField : UserControl
         EditCommand?.Execute(null);
     }
 
-    private void DirectInput_LostFocus(object? sender, RoutedEventArgs e)
+    private void DirectInput_LostFocus(object? sender, Avalonia.Input.FocusChangedEventArgs e)
     {
         ApplyDirectInput();
     }
