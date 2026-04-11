@@ -17,7 +17,6 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Headless;
 using Avalonia.Media.Imaging;
-using Avalonia.ReactiveUI;
 using Avalonia.Threading;
 using AgValoniaGPS.Desktop;
 using AgValoniaGPS.Desktop.Views;
@@ -43,6 +42,8 @@ sealed class Program
     static bool _uturnTestMode = false;
     static bool _tileTestMode = false;
     static bool _recPathTestMode = false;
+    static bool _remoteTestMode = false;
+    static int _remoteTestPort = 5123;
     static double _timeScale = 1.0;
 
     [STAThread]
@@ -54,6 +55,11 @@ sealed class Program
         _uturnTestMode = args.Contains("--uturn-test");
         _tileTestMode = args.Contains("--tile-test");
         _recPathTestMode = args.Contains("--recpath-test");
+        _remoteTestMode = args.Contains("--remote-test");
+
+        // Parse --port flag for remote test server
+        var portArg = args.FirstOrDefault(a => a.StartsWith("--port="));
+        if (portArg != null) _remoteTestPort = int.Parse(portArg.Split('=')[1]);
 
         // Parse --fast flag for accelerated time (e.g. --fast or --fast=10)
         var fastArg = args.FirstOrDefault(a => a.StartsWith("--fast"));
@@ -89,7 +95,8 @@ sealed class Program
         };
 
         // Hook scenario runner -- runs after MainWindow is shown
-        App.OnAppReady = _recPathTestMode ? RunRecPathTest
+        App.OnAppReady = _remoteTestMode ? RunRemoteTestServer
+                       : _recPathTestMode ? RunRecPathTest
                        : _tileTestMode ? RunTileTest
                        : _uturnTestMode ? RunUTurnTest
                        : _fieldTestMode ? RunFieldTest
@@ -108,7 +115,6 @@ sealed class Program
                 builder = builder.UsePlatformDetect();
 
             builder.WithInterFont()
-                .UseReactiveUI()
                 .StartWithClassicDesktopLifetime(
                     args.Where(a => a != "--headless" && !a.StartsWith("--fast")).ToArray());
         }
@@ -133,6 +139,26 @@ sealed class Program
 
         Console.WriteLine("[IntTest] ALL SCENARIOS PASSED");
         return 0;
+    }
+
+    static async Task RunRemoteTestServer(IClassicDesktopStyleApplicationLifetime lifetime)
+    {
+        var window = lifetime.MainWindow as Window
+            ?? throw new Exception("MainWindow not found");
+        var vm = (MainViewModel)window.DataContext!;
+
+        Console.WriteLine($"[Remote Test] Starting server on port {_remoteTestPort}...");
+        using var server = new RemoteTestServer(window, vm, _remoteTestPort);
+
+        // Run server until process is killed (Ctrl+C)
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            server.Dispose();
+            lifetime.Shutdown();
+        };
+
+        await server.RunAsync();
     }
 
     static async Task RunUTurnTest(IClassicDesktopStyleApplicationLifetime lifetime)
