@@ -19,6 +19,9 @@
     <CodesignProvision>Automatic</CodesignProvision>
     <DevTeam>7LRC55SQS3</DevTeam>
   </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <CodesignKey>iPhone Developer</CodesignKey>
+  </PropertyGroup>
 
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
