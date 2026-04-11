@@ -261,6 +261,61 @@ public class NmeaParserServiceTests
 
     #endregion
 
+    #region GSA Satellites In Use
+
+    [Test]
+    public void ParseSentence_GsaThenGgaRmc_UsesSatelliteCountFromGsa()
+    {
+        // GSA with 9 non-empty SVIDs (fields 3..11 filled, 12..14 empty)
+        // GGA reports 12, but GSA should take precedence
+        string gsa = RecalculateChecksum("$GNGSA,A,3,01,02,03,04,05,06,07,08,09,,,,,1.2,0.9,0.8,1");
+        string gga = RecalculateChecksum("$GNGGA,123519,4807.038,N,01131.000,E,4,12,0.9,545.4,M,46.9,M,,");
+        string rmc = RecalculateChecksum("$GNRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
+
+        _parser.ParseSentence(gsa);
+        _parser.ParseSentence(gga);
+        _parser.ParseSentence(rmc);
+
+        Assert.That(_lastGpsData, Is.Not.Null);
+        Assert.That(_lastGpsData!.SatellitesInUse, Is.EqualTo(9));
+    }
+
+    [Test]
+    public void ParseSentence_MultiConstellationGsa_SumsAllConstellations()
+    {
+        // GPS: 8 SVIDs, GLONASS: 5 SVIDs, Galileo: 4 SVIDs → total 17
+        string gpGsa = RecalculateChecksum("$GPGSA,A,3,01,02,03,04,05,06,07,08,,,,,,1.2,0.9,0.8,1");
+        string glGsa = RecalculateChecksum("$GLGSA,A,3,65,66,67,68,69,,,,,,,,,,1.5,1.1,1.0,2");
+        string gaGsa = RecalculateChecksum("$GAGSA,A,3,02,03,07,11,,,,,,,,,,,1.3,1.0,0.9,3");
+        string gga   = RecalculateChecksum("$GNGGA,123519,4807.038,N,01131.000,E,4,12,0.9,545.4,M,46.9,M,,");
+        string rmc   = RecalculateChecksum("$GNRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
+
+        _parser.ParseSentence(gpGsa);
+        _parser.ParseSentence(glGsa);
+        _parser.ParseSentence(gaGsa);
+        _parser.ParseSentence(gga);
+        _parser.ParseSentence(rmc);
+
+        Assert.That(_lastGpsData, Is.Not.Null);
+        Assert.That(_lastGpsData!.SatellitesInUse, Is.EqualTo(17));
+    }
+
+    [Test]
+    public void ParseSentence_NoGsa_FallsBackToGgaSatelliteCount()
+    {
+        // No GSA — should use GGA field 7 value
+        string gga = RecalculateChecksum("$GNGGA,123519,4807.038,N,01131.000,E,4,10,0.9,545.4,M,46.9,M,,");
+        string rmc = RecalculateChecksum("$GNRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W");
+
+        _parser.ParseSentence(gga);
+        _parser.ParseSentence(rmc);
+
+        Assert.That(_lastGpsData, Is.Not.Null);
+        Assert.That(_lastGpsData!.SatellitesInUse, Is.EqualTo(10));
+    }
+
+    #endregion
+
     #region Sentence Too Short
 
     [Test]

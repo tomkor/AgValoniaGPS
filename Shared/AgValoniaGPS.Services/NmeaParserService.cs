@@ -55,6 +55,14 @@ public class NmeaParserService
     private int _gsvSatsInView;
     private int _gsvStageAccum;
     private readonly System.Collections.Generic.HashSet<string> _gsvSeenIds = new(StringComparer.Ordinal);
+    // GSA accumulation — per-constellation used-satellite counts (non-empty SVID fields).
+    // In multi-GNSS systems one GSA sentence is emitted per constellation per epoch.
+    // _gsaSatsInUse holds the committed total; _gsaStageAccum accumulates across constellations.
+    // _gsaSeenIds prevents double-counting repeated sentences within one epoch.
+    // Committed to _gsaSatsInUse when the next GGA arrives (same epoch boundary as GSV).
+    private int _gsaSatsInUse;
+    private int _gsaStageAccum;
+    private readonly System.Collections.Generic.HashSet<string> _gsaSeenIds = new(StringComparer.Ordinal);
     private double _ggaHdop = 99.0;
     private float _ggaAlt;
     private bool _hasGgaData;
@@ -127,6 +135,10 @@ public class NmeaParserService
         else if (words[0].Length == 6 && words[0][0] == '$' && words[0].EndsWith("GSV", StringComparison.Ordinal) && words.Length >= 4)
         {
             ParseGSV(words);
+        }
+        else if (words[0].Length == 6 && words[0][0] == '$' && words[0].EndsWith("GSA", StringComparison.Ordinal) && words.Length >= 15)
+        {
+            ParseGSA(words);
         }
     }
 
@@ -301,13 +313,19 @@ public class NmeaParserService
         */
         try
         {
-            // Commit the GSV stage accumulator: all GSV messages for this epoch have
-            // already arrived (they precede GGA in the standard NMEA output order).
+            // Commit the GSV and GSA stage accumulators: all GSV/GSA messages for this
+            // epoch have already arrived (they precede GGA in standard NMEA output order).
             if (_gsvStageAccum > 0)
             {
                 _gsvSatsInView = _gsvStageAccum;
                 _gsvStageAccum = 0;
                 _gsvSeenIds.Clear();
+            }
+            if (_gsaStageAccum > 0)
+            {
+                _gsaSatsInUse = _gsaStageAccum;
+                _gsaStageAccum = 0;
+                _gsaSeenIds.Clear();
             }
 
             // Always parse status fields so the UI can show fix quality and satellite count
@@ -325,7 +343,7 @@ public class NmeaParserService
                 _gpsService.UpdateGpsData(new GpsData
                 {
                     FixQuality      = _ggaFix,
-                    SatellitesInUse = _ggaSats,
+                    SatellitesInUse = _gsaSatsInUse > 0 ? _gsaSatsInUse : _ggaSats,
                     SatellitesInView = _gsvSatsInView > 0 ? _gsvSatsInView : _ggaSats,
                     Hdop            = _ggaHdop,
                     IsValid         = false
@@ -368,7 +386,7 @@ public class NmeaParserService
             var gpsData = new GpsData
             {
                 FixQuality = _ggaFix,
-                SatellitesInUse = _ggaSats,
+                SatellitesInUse = _gsaSatsInUse > 0 ? _gsaSatsInUse : _ggaSats,
                 SatellitesInView = _gsvSatsInView > 0 ? _gsvSatsInView : _ggaSats,
                 Hdop = _ggaHdop,
                 Timestamp = DateTime.Now
@@ -432,6 +450,36 @@ public class NmeaParserService
             if (!_gsvSeenIds.Add(words[0])) return;
 
             _gsvStageAccum += count;
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Parse standard NMEA $GxGSA sentence.
+    ///
+    /// In multi-GNSS systems one GSA sentence is emitted per constellation per epoch.
+    /// Fields [3..14] hold SVID values for satellites actually used in the navigation fix;
+    /// unused slots are empty strings.  Counting non-empty slots gives the per-constellation
+    /// used count.  We accumulate these across constellations into _gsaStageAccum and commit
+    /// to _gsaSatsInUse when the next GGA arrives (GGA marks the epoch boundary).
+    /// </summary>
+    private void ParseGSA(string[] words)
+    {
+        try
+        {
+            // Avoid double-counting if the same constellation repeats within one epoch
+            if (!_gsaSeenIds.Add(words[0])) return;
+
+            // Count non-empty SVID fields (positions 3..14)
+            int count = 0;
+            int limit = Math.Min(15, words.Length);
+            for (int i = 3; i < limit; i++)
+            {
+                if (!string.IsNullOrEmpty(words[i]))
+                    count++;
+            }
+
+            _gsaStageAccum += count;
         }
         catch { }
     }
